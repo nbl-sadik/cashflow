@@ -783,8 +783,8 @@ function viewToday(){
   const bal=balanceNow(), o=outlook(30);
   const due=dueRecently(45), waiting=due.filter(x=>!x.done), up=upcoming(10);
   const recent=due.filter(x=>x.done && daysBetween(x.date,todayISO())<=4);
-  const ignoring=state.income.some(it=>it.count===false && plannedFor(it,mk)>0);
   const t=todayISO(), mk=monthOf(t);
+  const ignoring=state.income.some(it=>it.count===false && plannedFor(it,mk)>0);
   const spentToday=state.tx.filter(x=>x.date===t&&x.amount<0&&!x.adj).reduce((s,x)=>s-x.amount,0);
   const spentMonth=state.tx.filter(x=>monthOf(x.date)===mk&&x.amount<0&&!x.link&&!x.adj).reduce((s,x)=>s-x.amount,0);
 
@@ -1588,7 +1588,23 @@ function fallbackCopy(text,done){
 document.getElementById("fab").onclick=openAdd;
 document.getElementById("sheet").querySelector(".scrim").onclick=closeSheet;
 
+function fatal(err){
+  const app=document.getElementById("app");
+  if(app) app.innerHTML=`<div class="top"><h1>Something Broke</h1>
+    <p class="lead">The app hit an error while starting, so it stopped rather than show you wrong figures.</p></div>
+    <div class="card alert"><h3>What happened</h3><p>${esc(String(err&&err.message||err))}</p></div>
+    <section><p class="sub">Your data has not been touched. Send me that message and I'll fix it. If you need the app now, upload the previous version from your GitHub commit history.</p>
+    <button class="btn wide" id="fatal-backup">Back up my data</button></section>`;
+  const b=document.getElementById("fatal-backup");
+  if(b) b.onclick=()=>{
+    const text=JSON.stringify(state||{});
+    if(navigator.clipboard) navigator.clipboard.writeText(text).then(()=>toast("Backed up"),()=>{});
+  };
+  const fab=document.getElementById("fab"); if(fab) fab.style.display="none";
+}
+
 (async function(){
+ try{
   await detectStores();
   const saved=await load();
   state = (saved && saved.v===2) ? saved : defaultState();
@@ -1605,6 +1621,7 @@ document.getElementById("sheet").querySelector(".scrim").onclick=closeSheet;
   if(here>=0) curMonth=here;
   applyTheme();
   render();
+ }catch(err){ fatal(err); }
 })();
 </script>
 </body>
