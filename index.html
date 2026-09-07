@@ -558,6 +558,8 @@ function plannedRow(x,note){
 function viewToday(){
   const bal=balanceNow(), o=outlook(30);
   const due=dueRecently(45), waiting=due.filter(x=>!x.done), up=upcoming(10);
+  const recent=due.filter(x=>x.done && daysBetween(x.date,todayISO())<=4);
+  const ignoring=!state.countIncome;
   const t=todayISO(), mk=monthOf(t);
   const spentToday=state.tx.filter(x=>x.date===t&&x.amount<0&&!x.adj).reduce((s,x)=>s-x.amount,0);
   const spentMonth=state.tx.filter(x=>monthOf(x.date)===mk&&x.amount<0&&!x.link&&!x.adj).reduce((s,x)=>s-x.amount,0);
@@ -586,16 +588,22 @@ function viewToday(){
       <p>Bottoms out at ${money(o.low)} on ${dayLabel(o.at)}. Move a payment, bring income forward, or tick income you know is coming.</p>
     </div>`:""}
 
-    ${due.length?`<section>
-      <h2>Already due</h2>
-      <p class="sub">Tick when the money has actually moved. ${waiting.length?`<strong>${waiting.length}</strong> still waiting.`:"All caught up."} Tap a name to log a different amount.</p>
-      ${due.map(x=>plannedRow(x,dayLabel(x.date)+(x.done?" · logged":" · not logged yet"))).join("")}
+    ${waiting.length?`<section>
+      <h2>Needs ticking</h2>
+      <p class="sub">Due already, not recorded yet — so the balance above ignores ${waiting.length>1?"them":"it"}. Tap a name to log a different amount.</p>
+      ${waiting.map(x=>plannedRow(x,dayLabel(x.date))).join("")}
+    </section>`:""}
+
+    ${recent.length?`<section>
+      <h2>Just settled</h2>
+      <p class="sub">Last four days. Tap the tick to undo one.</p>
+      ${recent.map(x=>plannedRow(x,dayLabel(x.date))).join("")}
     </section>`:""}
 
     <section>
       <h2>Coming up</h2>
-      <p class="sub">Next 10 days. Tick anything that lands early and the balance moves today.</p>
-      ${up.length?up.map(x=>plannedRow(x,dayLabel(x.date)+" · in "+daysBetween(todayISO(),x.date)+" day"+(daysBetween(todayISO(),x.date)>1?"s":"")+(x.done?" · already logged":""))).join(""):`<div class="empty">Nothing scheduled.</div>`}
+      <p class="sub">Next 10 days. Tick anything that lands early and the balance moves today.${ignoring?` <strong>Expected income is switched off in Setup</strong>, so the green amounts below are not in the forecast.`:""}</p>
+      ${up.length?up.map(x=>plannedRow(x,dayLabel(x.date)+" · in "+daysBetween(todayISO(),x.date)+" day"+(daysBetween(todayISO(),x.date)>1?"s":"")+(x.done?" · already logged":"")+(x.kind==="in"&&ignoring?" · not counted":""))).join(""):`<div class="empty">Nothing scheduled.</div>`}
     </section>
 
     <section>
