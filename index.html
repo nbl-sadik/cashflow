@@ -843,10 +843,16 @@ function viewCfi(){
     const lvl=p===0?0:Math.min(4,Math.ceil(Math.abs(p)/maxAbs*4));
     const wknd=[5,6].includes((cfiOffset(mk)+x.d-1)%7);
     const flag=(x.flows||[]).length?`<span class="fl">${x.flows.some(f=>f.kind==="deposit")?"▲":"▼"}</span>`:"";
-    cells.push(`<button class="cell ${p>0?"up":p<0?"down":""} l${lvl} ${wknd?"wknd":""} ${x.date===today?"now":""} ${x.future?"fut":""}"
-      data-cfiday="${x.date}" aria-label="${dayLabel(x.date)} ${p?money(p):"no entry"}">
-      <span class="dd">${x.d}</span>${flag}
-      <span class="pl">${p?money(p):""}</span></button>`);
+    const inner=`<span class="dd">${x.d}</span>${flag}<span class="pl">${p?money(p):""}</span>`;
+    const cls=`cell ${p>0?"up":p<0?"down":""} l${lvl} ${wknd?"wknd":""} ${x.date===today?"now":""} ${x.future?"fut":""}`;
+    // markets are shut at the weekend — nothing to log, so nothing to tap.
+    // the one exception is a weekend that already holds a figure, so it can still be cleared.
+    if(wknd && p===0){
+      cells.push(`<div class="${cls}" aria-label="${dayLabel(x.date)}, weekend">${inner}</div>`);
+    }else{
+      cells.push(`<button class="${cls}" data-cfiday="${x.date}"
+        aria-label="${dayLabel(x.date)} ${p?money(p):"no entry"}">${inner}</button>`);
+    }
   });
 
   return `
@@ -868,8 +874,8 @@ function viewCfi(){
 
     <section>
       <h2>The Month, Day by Day</h2>
-      <p class="sub">Tap any day to log what you made or lost. Shaded by size. ▲ deposit, ▼ withdrawal.</p>
-      <div class="week">${["M","T","W","T","F","S","S"].map(d=>`<span>${d}</span>`).join("")}</div>
+      <p class="sub">Tap a weekday to log what you made or lost — shading follows the size. Weekends are closed. ▲ deposit, ▼ withdrawal.</p>
+      <div class="week">${["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map((d,i)=>`<span class="${i>4?"wk":""}">${d}</span>`).join("")}</div>
       <div class="cal">${cells.join("")}</div>
     </section>
 
