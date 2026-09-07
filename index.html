@@ -145,6 +145,10 @@
   .btn.mini{padding:6px 10px;font-size:12.5px}
   .btnrow{display:flex;gap:8px;margin-top:12px}
   .btnrow .btn{flex:1}
+  .shot{width:100%;max-height:220px;object-fit:contain;border:1px solid var(--rule);
+        border-radius:var(--radius);margin-top:12px;background:var(--bg);display:block}
+  .att{border:1px solid var(--rule);background:var(--surface);border-radius:6px;
+       padding:4px 7px;font-size:13px;line-height:1;cursor:pointer;flex:none;margin-right:2px}
   .del{border:none;background:none;color:var(--muted);font-size:17px;line-height:1;padding:4px 2px;cursor:pointer;flex:none}
   .seg{display:flex;border:1px solid var(--rule);border-radius:var(--radius);overflow:hidden;background:var(--surface)}
   .seg button{flex:1;padding:9px 6px;border:none;background:none;font-size:13.5px;color:var(--muted);cursor:pointer}
@@ -218,7 +222,7 @@
    Balance now = anchor + everything logged since.
    ========================================================== */
 const N_MONTHS = 12;
-const CATS = ["Groceries","Eating out","Fuel","Transport","Bills","Shopping","Cash","Family","Health","Other"];
+const CATS = ["Groceries","Eating out","Fuel","Transport","Bills","Shopping","Cash","Family","Health","Car wash","Laundry","Charity","Play","Other"];
 
 function spread(start,vals){
   const o={}; for(let i=0;i<N_MONTHS;i++) o[addMonths(start,i)] = vals[i] ?? 0; return o;
@@ -515,6 +519,194 @@ function toast(m){
   clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("show"),2400);
 }
 
+
+/* ==========================================================
+   ATTACHMENTS
+   Bills go in IndexedDB, not alongside the ledger. The ledger
+   store is small and text-only; scanned bills would fill it in
+   a fortnight. IndexedDB has room for hundreds of them.
+   ========================================================== */
+let _db=null;
+function idb(){
+  return new Promise((res,rej)=>{
+    if(_db) return res(_db);
+    if(!window.indexedDB) return rej(new Error("no indexeddb"));
+    const r=indexedDB.open("cashflow-files",1);
+    r.onupgradeneeded=()=>{ if(!r.result.objectStoreNames.contains("files")) r.result.createObjectStore("files"); };
+    r.onsuccess=()=>{ _db=r.result; res(_db); };
+    r.onerror=()=>rej(r.error);
+  });
+}
+function idbDo(mode,fn){
+  return idb().then(db=>new Promise((res,rej)=>{
+    const t=db.transaction("files",mode), st=t.objectStore("files");
+    let out=null;
+    const q=fn(st); if(q) q.onsuccess=()=>{ out=q.result; };
+    t.oncomplete=()=>res(out); t.onerror=()=>rej(t.error);
+  }));
+}
+const putFile=(id,rec)=>idbDo("readwrite",st=>st.put(rec,id));
+const getFile=id=>idbDo("readonly",st=>st.get(id));
+const delFile=id=>idbDo("readwrite",st=>st.delete(id));
+
+/** Photos get resized before storing — a phone snap is 4MB, a readable bill is 200KB. */
+function shrinkImage(file,maxDim,quality,docMode){
+  return new Promise((res,rej)=>{
+    const url=URL.createObjectURL(file), img=new Image();
+    img.onload=()=>{
+      let w=img.naturalWidth,h=img.naturalHeight;
+      const sc=Math.min(1,maxDim/Math.max(w,h));
+      w=Math.max(1,Math.round(w*sc)); h=Math.max(1,Math.round(h*sc));
+      const c=document.createElement("canvas"); c.width=w; c.height=h;
+      const ctx=c.getContext("2d");
+      ctx.drawImage(img,0,0,w,h);
+      if(docMode){
+        // grey it, lift the contrast, brighten the paper — reads like a scan and stores smaller
+        const im=ctx.getImageData(0,0,w,h), d=im.data;
+        // find the paper tone, then stretch everything below it toward black
+        let sum=0,n=0;
+        for(let i=0;i<d.length;i+=40){ sum+=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2]; n++; }
+        const paper=Math.max(90,sum/n);
+        const black=paper*0.45;                 // anything this dark is ink
+        for(let i=0;i<d.length;i+=4){
+          const g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+          let v=(g-black)/(paper-black);        // ink -> 0, paper -> 1
+          v=v<0?0:v>1?1:v;
+          v=Math.pow(v,1.6)*255;                // deepen the mid greys
+          d[i]=d[i+1]=d[i+2]= v<0?0:v>255?255:v;
+        }
+        ctx.putImageData(im,0,0);
+      }
+      c.toBlob(b=>{ URL.revokeObjectURL(url); b?res(b):rej(new Error("encode")); },"image/jpeg",quality);
+    };
+    img.onerror=()=>{ URL.revokeObjectURL(url); rej(new Error("load")); };
+    img.src=url;
+  });
+}
+
+async function storeAttachment(file,docMode){
+  if(file.size>12*1024*1024) throw new Error("too big");
+  const id="f"+Date.now()+Math.floor(Math.random()*1000);
+  let blob=file, type=file.type||"application/octet-stream";
+  if(/^image\//.test(type)){
+    try{ blob=await shrinkImage(file,1800,docMode?0.72:0.7,docMode); type="image/jpeg"; }catch(e){ blob=file; }
+  }
+  await putFile(id,{name:file.name||"bill",type,blob});
+  return {id,name:file.name||"bill",type,size:blob.size};
+}
+
+
+/* ---------- sharing files out ---------- */
+const _crcT=(()=>{const t=new Uint32Array(256);
+  for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
+function crc32(u8){ let c=0xFFFFFFFF; for(let i=0;i<u8.length;i++) c=_crcT[(c^u8[i])&0xFF]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }
+
+/** Plain stored ZIP — no compression, no library. Photos are already compressed. */
+function makeZip(entries){
+  const enc=new TextEncoder(), parts=[], central=[]; let off=0;
+  const dt=new Date();
+  const time=((dt.getHours()&31)<<11)|((dt.getMinutes()&63)<<5)|((dt.getSeconds()/2)&31);
+  const date=(((dt.getFullYear()-1980)&127)<<9)|(((dt.getMonth()+1)&15)<<5)|(dt.getDate()&31);
+  for(const e of entries){
+    const name=enc.encode(e.name), data=e.data, crc=crc32(data);
+    const lh=new Uint8Array(30+name.length), v=new DataView(lh.buffer);
+    v.setUint32(0,0x04034b50,true); v.setUint16(4,20,true);
+    v.setUint16(10,time,true); v.setUint16(12,date,true);
+    v.setUint32(14,crc,true); v.setUint32(18,data.length,true); v.setUint32(22,data.length,true);
+    v.setUint16(26,name.length,true); lh.set(name,30);
+    parts.push(lh,data);
+    const cd=new Uint8Array(46+name.length), c=new DataView(cd.buffer);
+    c.setUint32(0,0x02014b50,true); c.setUint16(4,20,true); c.setUint16(6,20,true);
+    c.setUint16(12,time,true); c.setUint16(14,date,true);
+    c.setUint32(16,crc,true); c.setUint32(20,data.length,true); c.setUint32(24,data.length,true);
+    c.setUint16(28,name.length,true); c.setUint32(42,off,true); cd.set(name,46);
+    central.push(cd);
+    off+=lh.length+data.length;
+  }
+  let cdSize=0; central.forEach(c=>cdSize+=c.length);
+  const eo=new Uint8Array(22), e2=new DataView(eo.buffer);
+  e2.setUint32(0,0x06054b50,true); e2.setUint16(8,entries.length,true); e2.setUint16(10,entries.length,true);
+  e2.setUint32(12,cdSize,true); e2.setUint32(16,off,true);
+  return [...parts,...central,eo];
+}
+
+function slug(t){ return String(t||"bill").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,40)||"bill"; }
+
+/** Hands the file to the phone's share sheet — Drive, Files, Mail, whatever is installed. */
+async function shareOrDownload(blob,filename){
+  try{
+    const f=new File([blob],filename,{type:blob.type});
+    if(navigator.canShare && navigator.canShare({files:[f]})){
+      await navigator.share({files:[f],title:filename});
+      return true;
+    }
+  }catch(e){ if(e && e.name==="AbortError") return false; }
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url; a.download=filename; a.rel="noopener";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),20000);
+  return true;
+}
+
+async function openAttSheet(txid){
+  const tx=state.tx.find(t=>t.id===txid); if(!tx||!tx.att) return;
+  let rec=null;
+  try{ rec=await getFile(tx.att.id); }catch(e){}
+  if(!rec){ toast("That file is missing"); return; }
+  const url=URL.createObjectURL(rec.blob);
+  const isImg=/^image\//.test(rec.type||"");
+  const ext=/pdf/.test(rec.type||"")?"pdf":"jpg";
+  const fname=tx.date+"-"+slug(tx.desc)+"."+ext;
+  openSheet(`
+    <h2>${esc(tx.desc||"Bill")}</h2>
+    <p class="sub">${dayLabel(tx.date)} · ${money(Math.abs(tx.amount))} AED · ${Math.round((tx.att.size||0)/1024)} KB</p>
+    ${isImg?`<img class="shot" src="${url}" alt="The attached bill">`:`<p class="hint">${esc(rec.name||"Attached file")}</p>`}
+    <button class="btn solid wide" id="at-share">Save or share</button>
+    <button class="btn wide" id="at-open">Open full size</button>
+    <button class="btn wide" data-close>Close</button>
+  `);
+  const p=document.getElementById("panel");
+  p.querySelector("#at-share").onclick=()=>shareOrDownload(rec.blob,fname);
+  p.querySelector("#at-open").onclick=()=>{
+    const a=document.createElement("a"); a.href=url; a.target="_blank"; a.rel="noopener";
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+  bindClose();
+  setTimeout(()=>URL.revokeObjectURL(url),120000);
+}
+
+async function exportAllBills(){
+  const withAtt=state.tx.filter(t=>t.att).sort((a,b)=>a.date<b.date?-1:1);
+  if(!withAtt.length){ toast("No bills attached yet"); return; }
+  toast("Packing "+withAtt.length+" bill"+(withAtt.length===1?"":"s")+"…");
+  const entries=[], rows=["date,description,category,amount,file"];
+  for(const t of withAtt){
+    let rec=null; try{ rec=await getFile(t.att.id); }catch(e){}
+    if(!rec) continue;
+    const ext=/pdf/.test(rec.type||"")?"pdf":"jpg";
+    const nm="bills/"+t.date+"-"+slug(t.desc)+"-"+t.id.slice(-4)+"."+ext;
+    entries.push({name:nm,data:new Uint8Array(await rec.blob.arrayBuffer())});
+    rows.push([t.date,'"'+String(t.desc||"").replace(/"/g,'""')+'"',t.cat||"",Math.abs(t.amount),nm].join(","));
+  }
+  if(!entries.length){ toast("Couldn't read the files"); return; }
+  entries.push({name:"index.csv",data:new TextEncoder().encode(rows.join("\r\n"))});
+  const blob=new Blob(makeZip(entries),{type:"application/zip"});
+  await shareOrDownload(blob,"cashflow-bills-"+todayISO()+".zip");
+}
+
+async function openAttachment(id){
+  try{
+    const rec=await getFile(id);
+    if(!rec){ toast("That file is missing"); return; }
+    const url=URL.createObjectURL(rec.blob);
+    const a=document.createElement("a");
+    a.href=url; a.target="_blank"; a.rel="noopener";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),30000);
+  }catch(e){ toast("Couldn't open the file"); }
+}
+
 /* ==========================================================
    RENDER
    ========================================================== */
@@ -634,7 +826,8 @@ function viewLog(){
         <div class="dayhead"><span>${dayLabel(d)}${d===todayISO()?" · today":""}</span><span>${signed(net)}</span></div>
         ${groups[d].map(x=>`<div class="row">
           <span class="name"><span class="n">${esc(x.desc||linkName(x.link&&x.link.itemId))}</span>
-          <span class="d">${x.adj?"correction":(x.link?"planned item":(x.cat||"day-to-day"))}</span></span>
+          <span class="d">${x.adj?"correction":(x.link?"planned item":(x.cat||"day-to-day"))}${x.att?" · bill attached":""}</span></span>
+          ${x.att?`<button class="att" data-att="${x.id}" aria-label="Open attached bill">&#128206;</button>`:""}
           <span class="v ${x.amount>=0?"in":"out"}">${signed(x.amount)}</span>
           <button class="del" data-deltx="${x.id}" aria-label="Delete entry">×</button>
         </div>`).join("")}
@@ -770,7 +963,9 @@ function viewSetup(){
       <button class="btn wide" id="selftest">Check saving now</button>
       <button class="btn wide" id="backup">Back up my data</button>
       <button class="btn wide" id="restore">Restore from a backup</button>
-      <p class="hint">Back up copies everything to your clipboard. Paste it somewhere safe — a note, an email to yourself. Restore pastes it back in.</p>
+      <p class="hint">Back up copies everything to your clipboard. Paste it somewhere safe — a note, an email to yourself. Restore pastes it back in. Attached bills are stored separately and are <strong>not</strong> in the backup, so keep the originals in your photos.</p>
+      <button class="btn wide" id="allbills">Save all bills to Drive or Files</button>
+      <p class="hint">Bundles every attached bill into one zip with an index, then opens your share sheet — pick Google Drive, Files, or Mail.</p>
       <button class="btn wide" id="reminders">Payment reminders for your calendar</button>
       <p class="hint">Downloads a calendar file with one repeating entry per card and loan, each alerting you the day before. Open it and Apple Calendar will offer to add them.</p>
       <button class="btn wide" id="export">Copy as a table for Excel</button>
@@ -864,9 +1059,13 @@ function wire(){
   });
 
   on("[data-deltx]",b=>b.onclick=()=>{
+    const gone=state.tx.find(x=>x.id===b.dataset.deltx);
+    if(gone && gone.att) delFile(gone.att.id).catch(()=>{});
     state.tx=state.tx.filter(x=>x.id!==b.dataset.deltx);
     save(); render(); toast("Deleted");
   });
+
+  on("[data-att]",b=>b.onclick=()=>openAttSheet(b.dataset.att));
 
   on("[data-amt]",el=>el.onchange=()=>{
     const [id,kind]=el.dataset.amt.split("|");
@@ -906,6 +1105,7 @@ function wire(){
   if($("add-out")) $("add-out").onclick=()=>addItem("out");
   if($("copyfwd")) $("copyfwd").onclick=copyForward;
   if($("selftest")) $("selftest").onclick=selfTest;
+  if($("allbills")) $("allbills").onclick=exportAllBills;
   if($("reminders")) $("reminders").onclick=exportReminders;
   if($("export")) $("export").onclick=exportAll;
   if($("backup")) $("backup").onclick=()=>{
@@ -934,7 +1134,7 @@ function wire(){
 }
 
 /* ---------- add-spending sheet ---------- */
-let sheetCat="Groceries";
+let sheetCat="Groceries", pendingFile=null, docMode=true;
 function openSheet(html){
   document.getElementById("panel").innerHTML=html;
   document.getElementById("sheet").classList.add("open");
@@ -942,27 +1142,76 @@ function openSheet(html){
 function closeSheet(){ document.getElementById("sheet").classList.remove("open"); }
 
 function openAdd(){
-  sheetCat="Groceries";
+  sheetCat="Groceries"; pendingFile=null; docMode=true;
   openSheet(`
     <h2>Log spending</h2>
     <input class="bigin" id="sp-amt" type="number" step="0.01" inputmode="decimal" placeholder="0" autofocus>
     <div class="chips" id="sp-cats">${CATS.map(c=>`<button class="chip ${c===sheetCat?"on":""}" data-cat="${c}">${c}</button>`).join("")}</div>
+    <div id="sp-billwrap" style="display:none">
+      <input type="file" id="sp-cam" accept="image/*" capture="environment" style="display:none">
+      <input type="file" id="sp-file" accept="image/*,application/pdf" style="display:none">
+      <div class="btnrow" style="margin-top:12px">
+        <button class="btn" id="sp-shoot">Scan the bill</button>
+        <button class="btn" id="sp-pick">Choose a file</button>
+      </div>
+      <div class="chips" style="margin:10px 0 0">
+        <button class="chip on" id="sp-doc" aria-pressed="true">Clean up as document</button>
+      </div>
+      <div id="sp-preview"></div>
+      <p class="hint" id="sp-fname">Straight from the camera, or a photo or PDF you already have.</p>
+    </div>
     <input class="text" id="sp-desc" type="text" placeholder="Note (optional)">
     <div class="field"><label for="sp-date">Date</label><input id="sp-date" type="date" value="${todayISO()}"></div>
     <button class="btn solid wide" id="sp-save">Save</button>
     <button class="btn wide" data-close>Cancel</button>
   `);
   const p=document.getElementById("panel");
+  const billwrap=p.querySelector("#sp-billwrap");
+  const fname=p.querySelector("#sp-fname");
+  const showBill=()=>{ billwrap.style.display = sheetCat==="Bills" ? "block" : "none"; };
+  showBill();
+
   p.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{
     sheetCat=b.dataset.cat;
     p.querySelectorAll("[data-cat]").forEach(x=>x.classList.toggle("on",x.dataset.cat===sheetCat));
+    showBill();
   });
-  p.querySelector("#sp-save").onclick=()=>{
+
+  const camInput=p.querySelector("#sp-cam"), fileInput=p.querySelector("#sp-file");
+  const preview=p.querySelector("#sp-preview"), docBtn=p.querySelector("#sp-doc");
+  docBtn.onclick=()=>{ docMode=!docMode; docBtn.classList.toggle("on",docMode); docBtn.setAttribute("aria-pressed",docMode); };
+  p.querySelector("#sp-shoot").onclick=()=>camInput.click();
+  p.querySelector("#sp-pick").onclick=()=>fileInput.click();
+
+  const took=(f)=>{
+    if(!f){ return; }
+    pendingFile=f;
+    preview.innerHTML="";
+    if(/^image\//.test(f.type||"")){
+      const url=URL.createObjectURL(f);
+      const im=document.createElement("img");
+      im.src=url; im.className="shot"; im.alt="The bill you just captured";
+      im.onload=()=>setTimeout(()=>URL.revokeObjectURL(url),20000);
+      preview.appendChild(im);
+      fname.textContent="Check it's readable before saving. Tap Scan again to retake.";
+    }else{
+      fname.textContent=(f.name||"File")+" attached.";
+    }
+  };
+  camInput.onchange=()=>took(camInput.files&&camInput.files[0]);
+  fileInput.onchange=()=>took(fileInput.files&&fileInput.files[0]);
+
+  p.querySelector("#sp-save").onclick=async()=>{
     const v=Number(p.querySelector("#sp-amt").value);
     if(!v||v<=0){ toast("Enter an amount"); return; }
-    state.tx.push({ id:"t"+Date.now(), date:p.querySelector("#sp-date").value,
-                    amount:-Math.abs(v), desc:p.querySelector("#sp-desc").value.trim()||sheetCat,
-                    cat:sheetCat, link:null });
+    const tx={ id:"t"+Date.now(), date:p.querySelector("#sp-date").value,
+               amount:-Math.abs(v), desc:p.querySelector("#sp-desc").value.trim()||sheetCat,
+               cat:sheetCat, link:null };
+    if(pendingFile && sheetCat==="Bills"){
+      try{ tx.att=await storeAttachment(pendingFile,docMode); }
+      catch(e){ toast(e.message==="too big"?"That file is too large":"Couldn't save the attachment"); }
+    }
+    state.tx.push(tx); pendingFile=null;
     save(); closeSheet(); render(); toast("Logged "+money(v));
   };
   bindClose();
