@@ -169,6 +169,51 @@
   details>summary:after{content:"+";font-weight:400;font-size:17px;color:var(--muted)}
   details[open]>summary:after{content:"–"}
 
+  /* ---- CFI tracker ---- */
+  .goal{margin-top:14px}
+  .goalends{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);margin-top:5px}
+  .spark{display:block;width:100%;height:40px;margin-top:14px;overflow:visible}
+
+  .cal{display:grid;grid-template-columns:repeat(7,1fr);
+       border:1px solid var(--rule);border-radius:12px;overflow:hidden;
+       background:var(--surface);margin-top:4px}
+  .cal .c{position:relative;aspect-ratio:.9;min-width:0;
+          border-right:1px solid var(--rule-soft);border-bottom:1px solid var(--rule-soft);
+          background:var(--surface);color:var(--ink);font:inherit;
+          display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
+          gap:3px;padding:7px 1px 5px;cursor:pointer;text-align:center}
+  .cal .c:nth-child(7n){border-right:none}
+  .cal .c:nth-last-child(-n+7){border-bottom:none}
+  .cal .c .n{font-size:15px;font-weight:500;line-height:1;font-variant-numeric:tabular-nums}
+  .cal .c .a{font-size:11px;font-weight:680;line-height:1.1;width:100%;
+             overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .cal .c .f{position:absolute;bottom:3px;right:4px;font-size:7.5px;color:var(--muted);line-height:1}
+  .cal .c.h{aspect-ratio:auto;padding:11px 0;cursor:default;font-size:12px;font-weight:500;
+            color:var(--muted);border-bottom:1px solid var(--rule);letter-spacing:.03em}
+  .cal .c.h.wk{opacity:.55}
+  .cal .c.out{background:var(--bg);cursor:default}
+  .cal .c.out .n{color:var(--muted);opacity:.5}
+  .cal .c.wk{background:var(--bg);cursor:default}
+  .cal .c.wk .n{opacity:.5}
+  .cal .c.dim{opacity:.55}
+  .cal .c.now .n{background:var(--ink);color:var(--onink);border-radius:50%;
+                 width:22px;height:22px;display:flex;align-items:center;justify-content:center}
+  .cal .c.up{background:color-mix(in srgb,var(--in) 20%,var(--surface))}
+  .cal .c.down{background:color-mix(in srgb,var(--out) 20%,var(--surface))}
+  .cal .c.up .a{color:var(--in)}
+  .cal .c.down .a{color:var(--out)}
+
+  .mrow{display:flex;align-items:center;gap:9px;width:100%;padding:9px 0;border:none;
+        border-bottom:1px solid var(--rule-soft);background:none;font:inherit;color:var(--ink);
+        cursor:pointer;text-align:left}
+  .mrow.cur .ml{font-weight:620}
+  .mrow .ml{flex:none;width:74px;font-size:13.5px}
+  .mrow .mbar{flex:1;height:6px;border-radius:3px;background:var(--rule-soft);overflow:hidden;min-width:30px}
+  .mrow .mbar span{display:block;height:100%;border-radius:3px}
+  .mrow .mv{flex:none;width:56px;text-align:right;font-size:13.5px;font-weight:560}
+  .mrow .ma{flex:none;width:74px;text-align:right;font-size:12.5px;color:var(--muted)}
+  .mrow .mv.neg{color:var(--out)} .mrow .mv.pos{color:var(--in)}
+
   /* month strip */
   .strip{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}
   .mcell{flex:none;width:64px;padding:8px 6px;border-radius:var(--radius);border:1px solid var(--rule);background:var(--surface);cursor:pointer;text-align:left}
@@ -805,10 +850,16 @@ function cfiBuild(){
   return out;
 }
 
-/** Monday-first offset for the 1st of the month. */
+/** Sunday-first column index for the 1st of the month. */
 function cfiOffset(mk){
   const [y,m]=mk.split("-").map(Number);
-  return (new Date(Date.UTC(y,m-1,1)).getUTCDay()+6)%7;
+  return new Date(Date.UTC(y,m-1,1)).getUTCDay();
+}
+/** Short enough to fit a cell: 12,694 becomes 12.7k */
+function cellAmt(v){
+  const a=Math.abs(v);
+  if(a>=10000) return (v<0?"−":"")+nf.format(Math.round(a/100)/10)+"k";
+  return money(Math.round(v));
 }
 
 function cfiSpark(M){
@@ -835,25 +886,28 @@ function viewCfi(){
   const maxAbs=Math.max(1,...M.days.filter(x=>!x.before).map(x=>Math.abs(x.pnl||0)));
   const today=todayISO();
 
-  const cells=[];
-  for(let i=0;i<cfiOffset(mk);i++) cells.push(`<div class="cell pad"></div>`);
+  const cells=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]
+    .map((d,i)=>`<div class="c h ${i===0||i===6?"wk":""}">${d[0]}</div>`);
+
+  const off=cfiOffset(mk), prev=addMonths(mk,-1), next=addMonths(mk,1);
+  const prevDim=daysInMonth(prev);
+  for(let i=off;i>0;i--) cells.push(`<div class="c out"><span class="n">${prevDim-i+1}</span></div>`);
+
   M.days.forEach(x=>{
-    if(x.before){ cells.push(`<div class="cell pad"><span class="dd">${x.d}</span></div>`); return; }
-    const p=x.pnl||0;
-    const lvl=p===0?0:Math.min(4,Math.ceil(Math.abs(p)/maxAbs*4));
-    const wknd=[5,6].includes((cfiOffset(mk)+x.d-1)%7);
-    const flag=(x.flows||[]).length?`<span class="fl">${x.flows.some(f=>f.kind==="deposit")?"▲":"▼"}</span>`:"";
-    const inner=`<span class="dd">${x.d}</span>${flag}<span class="pl">${p?money(p):""}</span>`;
-    const cls=`cell ${p>0?"up":p<0?"down":""} l${lvl} ${wknd?"wknd":""} ${x.date===today?"now":""} ${x.future?"fut":""}`;
-    // markets are shut at the weekend — nothing to log, so nothing to tap.
-    // the one exception is a weekend that already holds a figure, so it can still be cleared.
-    if(wknd && p===0){
-      cells.push(`<div class="${cls}" aria-label="${dayLabel(x.date)}, weekend">${inner}</div>`);
-    }else{
+    const col=(off+x.d-1)%7, wknd=(col===0||col===6);
+    const p=x.before?0:(x.pnl||0);
+    const flags=(x.flows||[]).length?`<span class="f">${x.flows.some(f=>f.kind==="deposit")?"▲":"▼"}</span>`:"";
+    const inner=`<span class="n">${x.d}</span>${p?`<span class="a">${cellAmt(p)}</span>`:""}${flags}`;
+    const cls=`c ${p>0?"up":p<0?"down":""} ${wknd?"wk":""} ${x.date===today?"now":""} ${x.future||x.before?"dim":""}`;
+    if((wknd&&p===0)||x.before)
+      cells.push(`<div class="${cls}" aria-label="${dayLabel(x.date)}${wknd?", weekend":""}">${inner}</div>`);
+    else
       cells.push(`<button class="${cls}" data-cfiday="${x.date}"
         aria-label="${dayLabel(x.date)} ${p?money(p):"no entry"}">${inner}</button>`);
-    }
   });
+
+  let tail=1;
+  while((cells.length-7)%7!==0) cells.push(`<div class="c out"><span class="n">${tail++}</span></div>`);
 
   return `
     <div class="monthbar">
@@ -875,7 +929,6 @@ function viewCfi(){
     <section>
       <h2>The Month, Day by Day</h2>
       <p class="sub">Tap a weekday to log what you made or lost — shading follows the size. Weekends are closed. ▲ deposit, ▼ withdrawal.</p>
-      <div class="week">${["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map((d,i)=>`<span class="${i>4?"wk":""}">${d}</span>`).join("")}</div>
       <div class="cal">${cells.join("")}</div>
     </section>
 
