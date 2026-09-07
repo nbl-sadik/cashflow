@@ -739,7 +739,7 @@ function viewSetup(){
 
     <section>
       <h2>Scheduled items · ${monthLabel(mk)}</h2>
-      <p class="sub">Amounts are per month. Move between months from the Months tab.</p>
+      <p class="sub">Tap a name to rename it or change its due day. Amounts are per month — move between months with the arrows below.</p>
       <div class="btnrow" style="margin:0 0 10px">
         <button class="btn mini" id="prev2" ${curMonth===0?"disabled":""}>‹ Earlier</button>
         <button class="btn mini" id="next2" ${curMonth===keys.length-1?"disabled":""}>Later ›</button>
@@ -771,6 +771,8 @@ function viewSetup(){
       <button class="btn wide" id="backup">Back up my data</button>
       <button class="btn wide" id="restore">Restore from a backup</button>
       <p class="hint">Back up copies everything to your clipboard. Paste it somewhere safe — a note, an email to yourself. Restore pastes it back in.</p>
+      <button class="btn wide" id="reminders">Payment reminders for your calendar</button>
+      <p class="hint">Downloads a calendar file with one repeating entry per card and loan, each alerting you the day before. Open it and Apple Calendar will offer to add them.</p>
       <button class="btn wide" id="export">Copy as a table for Excel</button>
       <button class="btn wide danger" id="reset">Start over from the spreadsheet figures</button>
     </section>`;
@@ -804,7 +806,7 @@ function itemRow(it,mk,kind){
   return `<div class="row">
     <button class="tick ${kind==="out"?"out":""} ${done?"on":""} ${part?"part":""}" data-tick="${it.id}|${mk}|${kind}"
             aria-pressed="${done}" aria-label="Mark ${esc(it.name)} ${kind==="in"?"received":"paid"}">${part?"–":"✓"}</button>
-    <span class="name"><span class="n">${esc(it.name)}</span><span class="d">day ${it.day}${note?" · "+note:""}</span></span>
+    <span class="name tap" data-rename="${it.id}|${kind}"><span class="n">${esc(it.name)}</span><span class="d">day ${it.day}${note?" · "+note:""}</span></span>
     <input class="amt" type="number" inputmode="decimal" value="${a||""}" placeholder="0" data-amt="${it.id}|${kind}">
     <button class="del" data-delitem="${it.id}|${kind}">×</button>
   </div>`;
@@ -888,6 +890,11 @@ function wire(){
     state.theme=b.dataset.themeSet; applyTheme(); save(); render();
   });
 
+  on("[data-rename]",el=>el.onclick=()=>{
+    const [id,kind]=el.dataset.rename.split("|");
+    openRename(id,kind);
+  });
+
   on("[data-ci]",b=>b.onclick=()=>{ state.countIncome=b.dataset.ci==="1"; save(); render(); });
 
   if($("a-bal")) $("a-bal").onchange=e=>{ state.anchor.balance=Number(e.target.value)||0; save(); render(); };
@@ -899,6 +906,7 @@ function wire(){
   if($("add-out")) $("add-out").onclick=()=>addItem("out");
   if($("copyfwd")) $("copyfwd").onclick=copyForward;
   if($("selftest")) $("selftest").onclick=selfTest;
+  if($("reminders")) $("reminders").onclick=exportReminders;
   if($("export")) $("export").onclick=exportAll;
   if($("backup")) $("backup").onclick=()=>{
     const text=JSON.stringify(state);
@@ -981,6 +989,75 @@ function openConfirm(it,mk,kind){
     save(); closeSheet(); render(); toast("Logged");
   };
   bindClose();
+}
+
+function openRename(id,kind){
+  const list = kind==="in" ? state.income : state.payments;
+  const it = list.find(x=>x.id===id); if(!it) return;
+  openSheet(`
+    <h2>Edit ${esc(it.name)}</h2>
+    <p class="sub">Renaming keeps every entry already logged against it. Past entries keep the old name, which is what it was called at the time.</p>
+    <input class="text" id="e-name" type="text" value="${esc(it.name)}" placeholder="Name">
+    <div class="field"><label for="e-day">Due day of month</label>
+      <input id="e-day" type="number" min="1" max="31" inputmode="numeric" value="${it.day}"></div>
+    <button class="btn solid wide" id="e-save">Save</button>
+    <button class="btn wide" data-close>Cancel</button>
+  `);
+  const p=document.getElementById("panel");
+  p.querySelector("#e-save").onclick=()=>{
+    const nm=p.querySelector("#e-name").value.trim();
+    if(!nm){ toast("Give it a name"); return; }
+    const d=Math.min(31,Math.max(1,parseInt(p.querySelector("#e-day").value,10)||it.day));
+    it.name=nm; it.day=d;
+    save(); closeSheet(); render(); toast("Updated");
+  };
+  bindClose();
+}
+
+
+/* ---------- calendar reminders ---------- */
+function icsEsc(t){ return String(t).replace(/([\\;,])/g,"\\$1").replace(/\n/g,"\\n"); }
+function pad2(n){ return String(n).padStart(2,"0"); }
+
+function exportReminders(){
+  const mk=monthOf(todayISO()), today=todayISO();
+  const now=new Date();
+  const stamp=now.getUTCFullYear()+pad2(now.getUTCMonth()+1)+pad2(now.getUTCDate())+"T"
+             +pad2(now.getUTCHours())+pad2(now.getUTCMinutes())+"00Z";
+  const L=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Cash Flow//EN","CALSCALE:GREGORIAN","METHOD:PUBLISH"];
+  let n=0;
+  state.payments.forEach(p=>{
+    const amt=plannedFor(p,mk);
+    let m=mk;
+    if(iso(mk,clampDay(mk,p.day))<=today) m=addMonths(mk,1);   // start with the next one still ahead
+    const dt=m.replace("-","")+pad2(clampDay(m,p.day))+"T090000";
+    const label=p.name+(amt>0?" \u00b7 AED "+nf.format(amt):"");
+    L.push("BEGIN:VEVENT",
+      "UID:cashflow-"+p.id+"@cashflow.local",
+      "DTSTAMP:"+stamp,
+      "DTSTART:"+dt,
+      "DURATION:PT30M",
+      "RRULE:FREQ=MONTHLY;BYMONTHDAY="+p.day,
+      "SUMMARY:"+icsEsc(label+" due"),
+      "DESCRIPTION:"+icsEsc("Due today. Tick it off in your Cash Flow app once paid."),
+      "BEGIN:VALARM","ACTION:DISPLAY","TRIGGER:-P1D",
+      "DESCRIPTION:"+icsEsc(label+" due tomorrow"),
+      "END:VALARM","END:VEVENT");
+    n++;
+  });
+  L.push("END:VCALENDAR");
+  downloadFile("cashflow-reminders.ics", L.join("\r\n"), "text/calendar;charset=utf-8");
+  toast(n+" reminder"+(n===1?"":"s")+" exported");
+}
+
+function downloadFile(name,text,mime){
+  try{
+    const url=URL.createObjectURL(new Blob([text],{type:mime}));
+    const a=document.createElement("a");
+    a.href=url; a.download=name; a.rel="noopener";
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },1500);
+  }catch(e){ toast("Couldn't create the file here"); }
 }
 
 function openReconcile(){
