@@ -154,6 +154,8 @@
   .seg{display:flex;border:1px solid var(--rule);border-radius:var(--radius);overflow:hidden;background:var(--surface)}
   .seg button{flex:1;padding:9px 6px;border:none;background:none;font-size:13.5px;color:var(--muted);cursor:pointer}
   .seg button.on{background:var(--ink);color:var(--onink)}
+  .seg.inrow{flex:none;width:142px}
+  .seg.inrow button{padding:6px 4px;font-size:12.5px}
   .hint{font-size:12.5px;color:var(--muted);margin-top:10px}
   details>summary{cursor:pointer;font-size:13.5px;font-weight:620;padding:15px 0;list-style:none;display:flex;justify-content:space-between;align-items:center}
   details>summary::-webkit-details-marker{display:none}
@@ -236,13 +238,12 @@ function defaultState(){
     startMonth:s,
     anchor:{ balance:14288.56, date:"2026-09-05" },
     budgets:{},
-    countIncome:true,
     income:[
-      {id:"i1",name:"BOGUS BT Citi ATE (less deem)",day:1,amounts:spread(s,[6200,6200,6200,8000,8000,0,0,0,0,0,0,0])},
-      {id:"i2",name:"Prasanth & Shiju Repay",day:3,amounts:spread(s,[1060,2500,2500,2500,2500,2500,0,0,0,0,0,0])},
-      {id:"i3",name:"Salary",day:15,amounts:spread(s,[15000,15000,15000,15000,15000,15000,15000,15000,15000,15000,15000,15000])},
-      {id:"i4",name:"CFI Income",day:25,amounts:spread(s,[0,0,0,0,0,0,0,0,0,0,0,0])},
-      {id:"i5",name:"Jumadad",day:25,amounts:spread(s,[6600,6600,6600,6600,6600,0,0,0,0,0,0,0])}
+      {id:"i1",count:true,name:"BOGUS BT Citi ATE (less deem)",day:1,amounts:spread(s,[6200,6200,6200,8000,8000,0,0,0,0,0,0,0])},
+      {id:"i2",count:false,name:"Prasanth & Shiju Repay",day:3,amounts:spread(s,[1060,2500,2500,2500,2500,2500,0,0,0,0,0,0])},
+      {id:"i3",count:false,name:"Salary",day:15,amounts:spread(s,[15000,15000,15000,15000,15000,15000,15000,15000,15000,15000,15000,15000])},
+      {id:"i4",count:true,name:"CFI Income",day:25,amounts:spread(s,[0,0,0,0,0,0,0,0,0,0,0,0])},
+      {id:"i5",count:true,name:"Jumadad",day:25,amounts:spread(s,[6600,6600,6600,6600,6600,0,0,0,0,0,0,0])}
     ],
     payments:[
       {id:"p1",name:"DIB xx0183",day:3,amounts:spread(s,[200,0,0,0,0,0,0,0,0,0,0,0])},
@@ -404,7 +405,8 @@ function build(){
       // before the anchor date is already inside the anchor figure
       if(day>today){
         if(rate>0){ pend+=rate; pendDays++; }
-        if(state.countIncome) state.income.forEach(it=>{
+        state.income.forEach(it=>{
+          if(it.count===false) return;
           if(clampDay(mk,it.day)!==d) return;
           const rem=remainingFor(it,mk); if(rem<=0) return;
           const part=rem<plannedFor(it,mk);
@@ -781,7 +783,7 @@ function viewToday(){
   const bal=balanceNow(), o=outlook(30);
   const due=dueRecently(45), waiting=due.filter(x=>!x.done), up=upcoming(10);
   const recent=due.filter(x=>x.done && daysBetween(x.date,todayISO())<=4);
-  const ignoring=!state.countIncome;
+  const ignoring=state.income.some(it=>it.count===false && plannedFor(it,mk)>0);
   const t=todayISO(), mk=monthOf(t);
   const spentToday=state.tx.filter(x=>x.date===t&&x.amount<0&&!x.adj).reduce((s,x)=>s-x.amount,0);
   const spentMonth=state.tx.filter(x=>monthOf(x.date)===mk&&x.amount<0&&!x.link&&!x.adj).reduce((s,x)=>s-x.amount,0);
@@ -824,8 +826,8 @@ function viewToday(){
 
     <section>
       <h2>Coming Up</h2>
-      <p class="sub">Next 10 days. Tick anything that lands early and the balance moves today.${ignoring?` <strong>Expected income is switched off in Setup</strong>, so the green amounts below are not in the forecast.`:""}</p>
-      ${up.length?up.map(x=>plannedRow(x,dayLabel(x.date)+" · in "+daysBetween(todayISO(),x.date)+" day"+(daysBetween(todayISO(),x.date)>1?"s":"")+(x.done?" · already logged":"")+(x.kind==="in"&&ignoring?" · not counted":""))).join(""):`<div class="empty">Nothing scheduled.</div>`}
+      <p class="sub">Next 10 days. Tick anything that lands early and the balance moves today.${ignoring?` Anything marked <strong>not counted</strong> is switched off in Setup and is not in the forecast until you log it.`:""}</p>
+      ${up.length?up.map(x=>plannedRow(x,dayLabel(x.date)+" · in "+daysBetween(todayISO(),x.date)+" day"+(daysBetween(todayISO(),x.date)>1?"s":"")+(x.done?" · already logged":"")+(x.kind==="in"&&x.item.count===false?" · not counted":""))).join(""):`<div class="empty">Nothing scheduled.</div>`}
     </section>
 
     <section>
@@ -990,12 +992,16 @@ function viewSetup(){
 
     <section>
       <h2>Expected Income</h2>
-      <p class="sub">Whether the forecast counts income that hasn't arrived yet.</p>
-      <div class="seg">
-        <button data-ci="1" class="${state.countIncome?"on":""}">Count it</button>
-        <button data-ci="0" class="${!state.countIncome?"on":""}">Ignore it</button>
-      </div>
-      <p class="hint">Ignore it is the stress test: what happens if nothing comes in.</p>
+      <p class="sub">Whether the forecast counts each income before it arrives. Set anything unreliable, or that turns up in pieces, to Ignore — it then lifts the balance only once you log it.</p>
+      ${state.income.map(it=>`<div class="row">
+        <span class="name"><span class="n">${esc(it.name)}</span>
+          <span class="d">${it.count===false?"only counted once logged":"counted from day "+it.day}</span></span>
+        <div class="seg inrow">
+          <button data-cnt="${it.id}|1" class="${it.count!==false?"on":""}">Count</button>
+          <button data-cnt="${it.id}|0" class="${it.count===false?"on":""}">Ignore</button>
+        </div>
+      </div>`).join("")}
+      <p class="hint">Ignored income still appears under Coming Up, tagged so you know it is not in the figures.</p>
     </section>
 
     <section>
@@ -1162,7 +1168,12 @@ function wire(){
     openRename(id,kind);
   });
 
-  on("[data-ci]",b=>b.onclick=()=>{ state.countIncome=b.dataset.ci==="1"; save(); render(); });
+  on("[data-cnt]",b=>b.onclick=()=>{
+    const [id,on]=b.dataset.cnt.split("|");
+    const it=state.income.find(x=>x.id===id); if(!it) return;
+    it.count = on==="1";
+    save(); render();
+  });
 
   if($("a-bal")) $("a-bal").onchange=e=>{ state.anchor.balance=Number(e.target.value)||0; save(); render(); };
   if($("a-date")) $("a-date").onchange=e=>{ state.anchor.date=e.target.value; save(); render(); };
@@ -1224,7 +1235,10 @@ function wire(){
       if(!parsed || !parsed.anchor || !Array.isArray(parsed.income)) throw new Error("shape");
       state=parsed;
       if(!Array.isArray(state.tx)) state.tx=[];
-      if(!state.theme) state.theme="auto";
+      state.income.forEach(it=>{
+    if(it.count===undefined) it.count = !(it.id==="i2"||it.id==="i3");   // salary and the repayments start off
+  });
+  if(!state.theme) state.theme="auto";
       applyTheme(); save(); render(); toast("Restored");
     }catch(e){ toast("That doesn't look like a backup"); }
   };
@@ -1531,7 +1545,7 @@ function addItem(kind){
   const name=prompt(kind==="in"?"Income name":"Card or loan name"); if(!name) return;
   const day=Math.min(31,Math.max(1,parseInt(prompt("Day of month it's due (1–31)","1"),10)||1));
   const amounts={}; monthKeys().forEach(k=>amounts[k]=0);
-  const it={id:kind[0]+Date.now(),name,day,amounts};
+  const it=kind==="in"?{id:"i"+Date.now(),count:true,name,day,amounts}:{id:"p"+Date.now(),name,day,amounts};
   (kind==="in"?state.income:state.payments).push(it);
   save(); render(); toast("Added — now set the amount");
 }
@@ -1582,6 +1596,9 @@ document.getElementById("sheet").querySelector(".scrim").onclick=closeSheet;
     [...state.income,...state.payments].forEach(it=>{ if(it.amounts[k]===undefined) it.amounts[k]=0; });
   });
   if(!Array.isArray(state.tx)) state.tx=[];
+  state.income.forEach(it=>{
+    if(it.count===undefined) it.count = !(it.id==="i2"||it.id==="i3");   // salary and the repayments start off
+  });
   if(!state.theme) state.theme="auto";
   extendHorizon();
   const here=monthKeys().indexOf(monthOf(todayISO()));
