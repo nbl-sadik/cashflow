@@ -274,7 +274,27 @@ function daysBetween(a,b){ return Math.round((Date.parse(b)-Date.parse(a))/86400
 const nf=new Intl.NumberFormat("en-US",{minimumFractionDigits:0,maximumFractionDigits:2});
 function money(n){ return (n<0?"−":"")+nf.format(Math.abs(n)); }
 function signed(n){ return (n<0?"−":"+")+nf.format(Math.abs(n)); }
-function monthKeys(){ const a=[]; for(let i=0;i<N_MONTHS;i++) a.push(addMonths(state.startMonth,i)); return a; }
+/** Always: from the starting month, through twelve months past today. */
+function monthKeys(){
+  const nowM=monthOf(todayISO());
+  const a=addMonths(state.startMonth,N_MONTHS-1), b=addMonths(nowM,N_MONTHS);
+  const last = a>b ? a : b;
+  const keys=[]; let k=state.startMonth;
+  while(k<=last && keys.length<180){ keys.push(k); k=addMonths(k,1); }
+  return keys;
+}
+
+/** New months inherit the last amount you set, so nothing silently drops to zero. */
+function extendHorizon(){
+  const keys=monthKeys();
+  [...state.income,...state.payments].forEach(it=>{
+    let last=0, seen=false;
+    keys.forEach(k=>{
+      if(it.amounts[k]===undefined){ it.amounts[k]= seen?last:0; }
+      else { last=Number(it.amounts[k])||0; seen=true; }
+    });
+  });
+}
 
 /* ---------- the engine ---------- */
 /** How much of a planned item has actually been logged this month. */
@@ -504,6 +524,7 @@ function applyTheme(){
 }
 
 function render(){
+  extendHorizon();
   months=build();
   const app=document.getElementById("app");
   app.innerHTML = tab==="today"?viewToday() : tab==="log"?viewLog() : tab==="months"?viewMonths() : viewSetup();
@@ -637,7 +658,7 @@ function viewMonths(){
     </section>
     <section>
       <h2>The year ahead</h2>
-      <p class="sub">Closing balance each month.</p>
+      <p class="sub">Closing balance each month, twelve months ahead. Scroll sideways.</p>
       <div class="strip">${keys.map((k,i)=>`<button class="mcell ${i===curMonth?"cur":""}" data-jump="${i}">
         <span class="m">${monthLabel(k,true)}</span>
         <span class="b ${months[k].closing<0?"neg":"pos"}">${money(months[k].closing)}</span></button>`).join("")}</div>
@@ -807,9 +828,9 @@ function wire(){
   on("[data-tab]",b=>b.onclick=()=>{ tab=b.dataset.tab; render(); window.scrollTo(0,0); });
   on("[data-jump]",b=>b.onclick=()=>{ curMonth=Number(b.dataset.jump); render(); window.scrollTo(0,0); });
   if($("prev")) $("prev").onclick=()=>{ curMonth=Math.max(0,curMonth-1); render(); window.scrollTo(0,0); };
-  if($("next")) $("next").onclick=()=>{ curMonth=Math.min(N_MONTHS-1,curMonth+1); render(); window.scrollTo(0,0); };
+  if($("next")) $("next").onclick=()=>{ curMonth=Math.min(monthKeys().length-1,curMonth+1); render(); window.scrollTo(0,0); };
   if($("prev2")) $("prev2").onclick=()=>{ curMonth=Math.max(0,curMonth-1); render(); };
-  if($("next2")) $("next2").onclick=()=>{ curMonth=Math.min(N_MONTHS-1,curMonth+1); render(); };
+  if($("next2")) $("next2").onclick=()=>{ curMonth=Math.min(monthKeys().length-1,curMonth+1); render(); };
 
   on("[data-tick]",b=>b.onclick=()=>{
     const [id,mk,kind]=b.dataset.tick.split("|");
@@ -1037,6 +1058,9 @@ document.getElementById("sheet").querySelector(".scrim").onclick=closeSheet;
   });
   if(!Array.isArray(state.tx)) state.tx=[];
   if(!state.theme) state.theme="auto";
+  extendHorizon();
+  const here=monthKeys().indexOf(monthOf(todayISO()));
+  if(here>=0) curMonth=here;
   applyTheme();
   render();
 })();
