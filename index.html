@@ -335,7 +335,7 @@ function build(){
 
   for(const mk of monthKeys()){
     const dim=daysInMonth(mk), rows=[], opening=bal;
-    let lowest=bal, lowDate=null, pend=0, pendDays=0, plannedIn=0, plannedOut=0, actualIn=0, actualOut=0;
+    let lowest=bal, lowDate=null, dipDate=null, pend=0, pendDays=0, plannedIn=0, plannedOut=0, actualIn=0, actualOut=0;
 
     const flush=(d)=>{
       if(pend<=0) return;
@@ -343,6 +343,7 @@ function build(){
       rows.push({cls:"drip plan",day:d,name:"Day-to-day spending, "+pendDays+" day"+(pendDays>1?"s":""),
                  amount:-pend,balance:bal,future:true});
       if(bal<lowest){lowest=bal;lowDate=iso(mk,d);}
+      if(dipDate===null && bal<0) dipDate=iso(mk,d);
       pend=0;pendDays=0;
     };
 
@@ -386,12 +387,13 @@ function build(){
           else { e.amount>0?actualIn+=e.amount:actualOut-=e.amount; }
           rows.push(e);
           if(bal<lowest){lowest=bal;lowDate=day;}
+          if(dipDate===null && bal<0) dipDate=day;
         });
       }
     }
     flush(dim);
 
-    months[mk]={rows,opening,closing:bal,lowest,lowDate,plannedIn,plannedOut,actualIn,actualOut,
+    months[mk]={rows,opening,closing:bal,lowest,lowDate,dipDate,plannedIn,plannedOut,actualIn,actualOut,
                 budgeted:state.income.reduce((s,it)=>s+(Number(it.amounts[mk])||0),0),
                 cards:state.payments.reduce((s,p)=>s+(Number(p.amounts[mk])||0),0)};
   }
@@ -437,15 +439,17 @@ function upcoming(days){
 /** Lowest projected balance in the next N days. */
 function outlook(days){
   const months=build(), today=todayISO();
-  let low=Infinity, at=null;
-  Object.keys(months).forEach(mk=>{
+  let low=Infinity, at=null, dip=null;
+  monthKeys().forEach(mk=>{
     months[mk].rows.forEach(r=>{
       const d=iso(mk,r.day);
-      if(d>today && daysBetween(today,d)<=days && r.balance<low){ low=r.balance; at=d; }
+      if(d<=today || daysBetween(today,d)>days) return;
+      if(r.balance<low){ low=r.balance; at=d; }
+      if(dip===null && r.balance<0) dip=d;
     });
   });
   if(low===Infinity){ low=balanceNow(); at=null; }
-  return {low,at};
+  return {low,at,dip};
 }
 function avgDailySpend(){
   const un=state.tx.filter(t=>t.amount<0 && !t.link && !t.adj);
@@ -565,7 +569,9 @@ function viewToday(){
       <div class="figure ${bal<0?"neg":""}">${money(bal)}<span class="cur">AED</span></div>
       <p class="lead">${
         o.at
-          ? `Lowest point in the next 30 days: <strong>${money(o.low)}</strong> on ${dayLabel(o.at)}.`
+          ? (o.low<0 && o.dip
+              ? `Below zero from <strong>${dayLabel(o.dip)}</strong>, lowest ${money(o.low)} on ${dayLabel(o.at)}.`
+              : `Lowest point in the next 30 days: <strong>${money(o.low)}</strong> on ${dayLabel(o.at)}.`)
           : `Nothing scheduled in the next 30 days.`
       }${spentToday>0?` Spent <strong>${money(spentToday)}</strong> today.`:""}</p>
     </div>
@@ -576,8 +582,8 @@ function viewToday(){
     </div>`:""}
 
     ${o.low<0?`<div class="card alert">
-      <h3>Short by ${money(Math.abs(o.low))} on ${dayLabel(o.at)}</h3>
-      <p>On the current plan the balance goes below zero before then. Move a payment, or bring income forward.</p>
+      <h3>Below zero from ${o.dip?dayLabel(o.dip):dayLabel(o.at)}</h3>
+      <p>Bottoms out at ${money(o.low)} on ${dayLabel(o.at)}. Move a payment, bring income forward, or tick income you know is coming.</p>
     </div>`:""}
 
     ${due.length?`<section>
@@ -640,9 +646,11 @@ function viewMonths(){
     <div class="top">
       <h1>${short?"Lowest point":"Closing balance"}</h1>
       <div class="figure ${short?"neg":"pos"}">${money(short?M.lowest:M.closing)}<span class="cur">AED</span></div>
-      <p class="lead">${short
-        ? `Goes below zero on <strong>${dayLabel(M.lowDate)}</strong>. Closing ${money(M.closing)}.`
-        : `Stays positive all month. Opened at ${money(M.opening)}.`}</p>
+      <p class="lead">${!short
+        ? `Stays positive all month. Opened at ${money(M.opening)}.`
+        : M.dipDate
+          ? `Goes below zero on <strong>${dayLabel(M.dipDate)}</strong>${M.dipDate!==M.lowDate?`, bottoming at ${money(M.lowest)} on ${dayLabel(M.lowDate)}`:""}. Closing ${money(M.closing)}.`
+          : `Starts the month already below zero. Lowest ${money(M.lowest)} on ${dayLabel(M.lowDate)}. Closing ${money(M.closing)}.`}</p>
     </div>
     <section>
       <h2>How the month runs</h2>
