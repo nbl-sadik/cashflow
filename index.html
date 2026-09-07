@@ -207,7 +207,7 @@
 </head>
 <body>
 <div class="wrap" id="app"><div class="empty">Loading…</div></div>
-<button class="fab" id="fab">+ Log spending</button>
+<button class="fab" id="fab">+ Log entry</button>
 <nav class="tabs" id="tabs"></nav>
 <div class="sheet" id="sheet"><div class="scrim" data-close></div><div class="panel" id="panel"></div></div>
 <div class="toast" id="toast"></div>
@@ -1235,7 +1235,7 @@ function wire(){
 }
 
 /* ---------- add-spending sheet ---------- */
-let sheetCat="Groceries", pendingFile=null, docMode=true;
+let sheetCat="Groceries", pendingFile=null, docMode=true, sheetMode="out", sheetIncomeId="";
 function openSheet(html){
   document.getElementById("panel").innerHTML=html;
   document.getElementById("sheet").classList.add("open");
@@ -1244,76 +1244,158 @@ function closeSheet(){ document.getElementById("sheet").classList.remove("open")
 
 function openAdd(){
   sheetCat="Groceries"; pendingFile=null; docMode=true;
+  sheetMode="out"; sheetIncomeId="";
+  drawAddSheet();
+}
+
+function drawAddSheet(){
+  const isIn = sheetMode==="in";
   openSheet(`
-    <h2>Log Spending</h2>
-    <input class="bigin" id="sp-amt" type="number" step="0.01" inputmode="decimal" placeholder="0" autofocus>
-    <div class="chips" id="sp-cats">${CATS.map(c=>`<button class="chip ${c===sheetCat?"on":""}" data-cat="${c}">${c}</button>`).join("")}</div>
-    <div id="sp-billwrap" style="display:none">
-      <input type="file" id="sp-cam" accept="image/*" capture="environment" style="display:none">
-      <input type="file" id="sp-file" accept="image/*,application/pdf" style="display:none">
-      <div class="btnrow" style="margin-top:12px">
-        <button class="btn" id="sp-shoot">Scan the bill</button>
-        <button class="btn" id="sp-pick">Choose a file</button>
-      </div>
-      <div class="chips" style="margin:10px 0 0">
-        <button class="chip on" id="sp-doc" aria-pressed="true">Clean up as document</button>
-      </div>
-      <div id="sp-preview"></div>
-      <p class="hint" id="sp-fname">Straight from the camera, or a photo or PDF you already have.</p>
+    <h2>${isIn?"Log Income":"Log Spending"}</h2>
+    <div class="seg" style="margin-bottom:14px">
+      <button data-mode="out" class="${!isIn?"on":""}">Money out</button>
+      <button data-mode="in" class="${isIn?"on":""}">Money in</button>
     </div>
+    <input class="bigin" id="sp-amt" type="number" step="0.01" inputmode="decimal" placeholder="0" autofocus>
+    ${isIn ? incomePicker() : `
+      <div class="chips" id="sp-cats">${CATS.map(c=>`<button class="chip ${c===sheetCat?"on":""}" data-cat="${c}">${c}</button>`).join("")}</div>
+      <div id="sp-billwrap" style="display:none">
+        <input type="file" id="sp-cam" accept="image/*" capture="environment" style="display:none">
+        <input type="file" id="sp-file" accept="image/*,application/pdf" style="display:none">
+        <div class="btnrow" style="margin-top:12px">
+          <button class="btn" id="sp-shoot">Scan the bill</button>
+          <button class="btn" id="sp-pick">Choose a file</button>
+        </div>
+        <div class="chips" style="margin:10px 0 0">
+          <button class="chip on" id="sp-doc" aria-pressed="true">Clean up as document</button>
+        </div>
+        <div id="sp-preview"></div>
+        <p class="hint" id="sp-fname">Straight from the camera, or a photo or PDF you already have.</p>
+      </div>`}
     <input class="text" id="sp-desc" type="text" placeholder="Note (optional)">
     <div class="field"><label for="sp-date">Date</label><input id="sp-date" type="date" value="${todayISO()}"></div>
     <button class="btn solid wide" id="sp-save">Save</button>
     <button class="btn wide" data-close>Cancel</button>
   `);
-  const p=document.getElementById("panel");
-  const billwrap=p.querySelector("#sp-billwrap");
-  const fname=p.querySelector("#sp-fname");
-  const showBill=()=>{ billwrap.style.display = sheetCat==="Bills" ? "block" : "none"; };
-  showBill();
+  wireAddSheet();
+}
 
-  p.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{
-    sheetCat=b.dataset.cat;
-    p.querySelectorAll("[data-cat]").forEach(x=>x.classList.toggle("on",x.dataset.cat===sheetCat));
-    showBill();
+/** Which planned income this belongs to, and what is still outstanding on it. */
+function incomePicker(){
+  const mk=monthOf(todayISO());
+  const opts=state.income.filter(it=>plannedFor(it,mk)>0);
+  const sel=opts.find(it=>it.id===sheetIncomeId);
+  const left=sel?remainingFor(sel,mk):0;
+  return `
+    <div class="chips" id="sp-quick">
+      <button class="chip" data-bump="500">+500</button>
+      <button class="chip" data-bump="1000">+1,000</button>
+      <button class="chip" data-bump="2000">+2,000</button>
+      <button class="chip" data-bump="5000">+5,000</button>
+      ${left>0?`<button class="chip" data-set="${left}">Rest, ${money(left)}</button>`:""}
+      <button class="chip" data-bump="0">Clear</button>
+    </div>
+    <div class="chips" id="sp-inc">
+      ${opts.map(it=>`<button class="chip ${it.id===sheetIncomeId?"on":""}" data-inc="${it.id}">${esc(it.name)}</button>`).join("")}
+      <button class="chip ${sheetIncomeId===""?"on":""}" data-inc="">Other income</button>
+    </div>
+    <p class="hint" id="sp-incnote">${
+      sel ? `${money(receivedFor(sel.id,mk))} of ${money(plannedFor(sel,mk))} in so far · <strong>${money(left)} still due</strong>. What you log here comes off that.`
+          : "Not tied to anything scheduled — it just adds to the balance."
+    }</p>`;
+}
+
+function wireAddSheet(){
+  const p=document.getElementById("panel");
+  const amtEl=p.querySelector("#sp-amt");
+  const keep=()=>amtEl.value;
+
+  p.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{
+    const v=keep(); sheetMode=b.dataset.mode; drawAddSheet();
+    const a=document.getElementById("sp-amt"); if(a) a.value=v;
   });
 
-  const camInput=p.querySelector("#sp-cam"), fileInput=p.querySelector("#sp-file");
-  const preview=p.querySelector("#sp-preview"), docBtn=p.querySelector("#sp-doc");
-  docBtn.onclick=()=>{ docMode=!docMode; docBtn.classList.toggle("on",docMode); docBtn.setAttribute("aria-pressed",docMode); };
-  p.querySelector("#sp-shoot").onclick=()=>camInput.click();
-  p.querySelector("#sp-pick").onclick=()=>fileInput.click();
+  if(sheetMode==="in"){
+    p.querySelectorAll("[data-inc]").forEach(b=>b.onclick=()=>{
+      const v=keep(); sheetIncomeId=b.dataset.inc; drawAddSheet();
+      const a=document.getElementById("sp-amt"); if(a) a.value=v;
+    });
 
-  const took=(f)=>{
-    if(!f){ return; }
-    pendingFile=f;
-    preview.innerHTML="";
-    if(/^image\//.test(f.type||"")){
-      const url=URL.createObjectURL(f);
-      const im=document.createElement("img");
-      im.src=url; im.className="shot"; im.alt="The bill you just captured";
-      im.onload=()=>setTimeout(()=>URL.revokeObjectURL(url),20000);
-      preview.appendChild(im);
-      fname.textContent="Check it's readable before saving. Tap Scan again to retake.";
-    }else{
-      fname.textContent=(f.name||"File")+" attached.";
-    }
-  };
-  camInput.onchange=()=>took(camInput.files&&camInput.files[0]);
-  fileInput.onchange=()=>took(fileInput.files&&fileInput.files[0]);
+    const mk=monthOf(todayISO());
+    const sel=sheetIncomeId?state.income.find(x=>x.id===sheetIncomeId):null;
+    const got=sel?receivedFor(sel.id,mk):0, plan=sel?plannedFor(sel,mk):0, left=sel?remainingFor(sel,mk):0;
+    const note=p.querySelector("#sp-incnote");
+    const updateNote=()=>{
+      if(!note) return;
+      const v=Number(amtEl.value)||0;
+      if(!sel){ note.textContent="Not tied to anything scheduled — it just adds to the balance."; return; }
+      note.innerHTML = v>0
+        ? `${money(got)} of ${money(plan)} in so far. Logging ${money(v)} leaves <strong>${money(Math.max(0,left-v))} still due</strong>.`
+        : `${money(got)} of ${money(plan)} in so far · <strong>${money(left)} still due</strong>. What you log here comes off that.`;
+    };
+    p.querySelectorAll("[data-bump]").forEach(b=>b.onclick=()=>{
+      const inc=Number(b.dataset.bump);
+      amtEl.value = inc===0 ? "" : String((Number(amtEl.value)||0)+inc);
+      updateNote();
+    });
+    p.querySelectorAll("[data-set]").forEach(b=>b.onclick=()=>{
+      amtEl.value=String(Number(b.dataset.set)); updateNote();
+    });
+    amtEl.oninput=updateNote;
+  }else{
+    const billwrap=p.querySelector("#sp-billwrap"), fname=p.querySelector("#sp-fname");
+    const preview=p.querySelector("#sp-preview"), docBtn=p.querySelector("#sp-doc");
+    const showBill=()=>{ billwrap.style.display = sheetCat==="Bills" ? "block" : "none"; };
+    showBill();
+    p.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{
+      sheetCat=b.dataset.cat;
+      p.querySelectorAll("[data-cat]").forEach(x=>x.classList.toggle("on",x.dataset.cat===sheetCat));
+      showBill();
+    });
+    docBtn.onclick=()=>{ docMode=!docMode; docBtn.classList.toggle("on",docMode); docBtn.setAttribute("aria-pressed",docMode); };
+    const camInput=p.querySelector("#sp-cam"), fileInput=p.querySelector("#sp-file");
+    p.querySelector("#sp-shoot").onclick=()=>camInput.click();
+    p.querySelector("#sp-pick").onclick=()=>fileInput.click();
+    const took=(f)=>{
+      if(!f) return;
+      pendingFile=f; preview.innerHTML="";
+      if(/^image\//.test(f.type||"")){
+        const url=URL.createObjectURL(f);
+        const im=document.createElement("img");
+        im.src=url; im.className="shot"; im.alt="The bill you just captured";
+        im.onload=()=>setTimeout(()=>URL.revokeObjectURL(url),20000);
+        preview.appendChild(im);
+        fname.textContent="Check it's readable before saving. Tap Scan again to retake.";
+      }else{ fname.textContent=(f.name||"File")+" attached."; }
+    };
+    camInput.onchange=()=>took(camInput.files&&camInput.files[0]);
+    fileInput.onchange=()=>took(fileInput.files&&fileInput.files[0]);
+  }
 
   p.querySelector("#sp-save").onclick=async()=>{
     const v=Number(p.querySelector("#sp-amt").value);
     if(!v||v<=0){ toast("Enter an amount"); return; }
-    const tx={ id:"t"+Date.now(), date:p.querySelector("#sp-date").value,
-               amount:-Math.abs(v), desc:p.querySelector("#sp-desc").value.trim()||sheetCat,
-               cat:sheetCat, link:null };
-    if(pendingFile && sheetCat==="Bills"){
+    const date=p.querySelector("#sp-date").value;
+    const note=p.querySelector("#sp-desc").value.trim();
+    const isIn=sheetMode==="in";
+    const item=isIn&&sheetIncomeId ? state.income.find(x=>x.id===sheetIncomeId) : null;
+    const tx={ id:"t"+Date.now(), date,
+               amount: isIn ? Math.abs(v) : -Math.abs(v),
+               desc: note || (isIn ? (item?item.name:"Income") : sheetCat),
+               cat: isIn ? null : sheetCat,
+               link: item ? {itemId:item.id, month:monthOf(date)} : null };
+    if(!isIn && pendingFile && sheetCat==="Bills"){
       try{ tx.att=await storeAttachment(pendingFile,docMode); }
       catch(e){ toast(e.message==="too big"?"That file is too large":"Couldn't save the attachment"); }
     }
     state.tx.push(tx); pendingFile=null;
-    save(); closeSheet(); render(); toast("Logged "+money(v));
+    save(); closeSheet(); render();
+    if(item){
+      const left=remainingFor(item,monthOf(date));
+      toast(left>0 ? money(v)+" in · "+money(left)+" still due" : item.name+" now complete");
+    }else{
+      toast((isIn?"Added ":"Logged ")+money(v));
+    }
   };
   bindClose();
   setTimeout(()=>{ const a=document.getElementById("sp-amt"); if(a) a.focus(); },60);
