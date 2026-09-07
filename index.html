@@ -46,6 +46,13 @@
     font-variant-numeric:tabular-nums; font-feature-settings:"tnum" 1;
   }
   .wrap{max-width:520px;margin:0 auto;padding:0 14px calc(96px + env(safe-area-inset-bottom))}
+  .appbar{position:sticky;top:0;z-index:25;background:var(--bg);border-bottom:1px solid var(--rule);
+          display:flex;align-items:center;gap:6px;height:48px;margin:0 -14px;padding:0 8px 0 14px}
+  .appbar .title{flex:1;font-size:15.5px;font-weight:620;letter-spacing:-.005em}
+  .appbar button{border:none;background:none;color:var(--ink);cursor:pointer;
+                 padding:8px 10px;border-radius:8px;font-size:15px;line-height:1}
+  .appbar button.icon{font-size:19px;letter-spacing:2px;padding:6px 10px}
+  .appbar button.back{margin-left:-6px;color:var(--muted);font-size:14.5px}
   .num{font-variant-numeric:tabular-nums}
   button,input,select{font:inherit;color:var(--ink)}
   button:focus-visible,input:focus-visible{outline:2px solid var(--in);outline-offset:2px}
@@ -168,7 +175,7 @@
   .mcell.cur{border-color:var(--ink);border-width:1.5px}
   .mcell .m{font-size:11.5px;color:var(--muted);display:block}
   .mcell .b{font-size:13px;font-weight:560;display:block;margin-top:2px}
-  .monthbar{position:sticky;top:0;z-index:20;background:var(--bg);display:flex;align-items:center;gap:10px;padding:12px 0 10px;border-bottom:1px solid var(--rule)}
+  .monthbar{position:sticky;top:48px;z-index:20;background:var(--bg);display:flex;align-items:center;gap:10px;padding:12px 0 10px;border-bottom:1px solid var(--rule)}
   .monthbar h1{font-size:17px;font-weight:650;margin:0;flex:1}
   .navbtn{width:34px;height:34px;border-radius:50%;border:1px solid var(--rule);background:var(--surface);font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer}
   .navbtn:disabled{opacity:.32}
@@ -208,7 +215,10 @@
 </style>
 </head>
 <body>
-<div class="wrap" id="app"><div class="empty">Loading…</div></div>
+<div class="wrap">
+  <header class="appbar" id="appbar"></header>
+  <div id="app"><div class="empty">Loading…</div></div>
+</div>
 <button class="fab" id="fab">+ Log entry</button>
 <nav class="tabs" id="tabs"></nav>
 <div class="sheet" id="sheet"><div class="scrim" data-close></div><div class="panel" id="panel"></div></div>
@@ -740,9 +750,262 @@ async function openAttachment(id){
 }
 
 /* ==========================================================
+   CFI — broker profit tracker
+   ----------------------------------------------------------
+   Return is measured against average capital for the month,
+   not the opening balance. Deposit halfway through the month
+   and only half of it was working for you, so counting it in
+   full would understate the return; withdrawing would flatter it.
+   ========================================================== */
+function cfiInit(){
+  if(!state.cfi) state.cfi={ opening:0, openingDate:monthOf(todayISO())+"-01", target:10, pnl:{}, flows:[] };
+  if(!state.cfi.pnl) state.cfi.pnl={};
+  if(!state.cfi.flows) state.cfi.flows=[];
+  if(state.cfi.target===undefined) state.cfi.target=10;
+}
+
+function cfiRange(){
+  const c=state.cfi;
+  const start=monthOf(c.openingDate);
+  let last=monthOf(todayISO());
+  Object.keys(c.pnl).forEach(d=>{ if(monthOf(d)>last) last=monthOf(d); });
+  c.flows.forEach(f=>{ if(monthOf(f.date)>last) last=monthOf(f.date); });
+  const keys=[]; let k=start;
+  while(k<=last && keys.length<240){ keys.push(k); k=addMonths(k,1); }
+  return keys;
+}
+
+function cfiBuild(){
+  const c=state.cfi, today=todayISO();
+  const byDate={};
+  c.flows.forEach(f=>{ (byDate[f.date]=byDate[f.date]||[]).push(f); });
+  let bal=Number(c.opening)||0;
+  const out={};
+  for(const mk of cfiRange()){
+    const dim=daysInMonth(mk), opening=bal, days=[];
+    let profit=0, dep=0, wd=0, sumBal=0, counted=0, best=null, worst=null, wins=0, losses=0;
+    for(let d=1;d<=dim;d++){
+      const day=iso(mk,d);
+      if(day<c.openingDate){ days.push({d,date:day,before:true}); continue; }
+      const p=Number(c.pnl[day])||0;
+      const fl=byDate[day]||[];
+      let net=0;
+      fl.forEach(f=>{ const a=Math.abs(Number(f.amount)||0);
+        if(f.kind==="deposit"){ dep+=a; net+=a; } else { wd+=a; net-=a; } });
+      bal+=p+net; profit+=p;
+      if(p>0) wins++; if(p<0) losses++;
+      if(p!==0){ if(best===null||p>best.p) best={d,p}; if(worst===null||p<worst.p) worst={d,p}; }
+      if(day<=today){ sumBal+=bal; counted++; }
+      days.push({d,date:day,pnl:p,flows:fl,bal,future:day>today});
+    }
+    const avg=counted?sumBal/counted:opening;
+    out[mk]={opening,closing:bal,profit,dep,wd,avg,days,best,worst,wins,losses,
+             pct: avg>0 ? profit/avg*100 : 0};
+  }
+  return out;
+}
+
+/** Monday-first offset for the 1st of the month. */
+function cfiOffset(mk){
+  const [y,m]=mk.split("-").map(Number);
+  return (new Date(Date.UTC(y,m-1,1)).getUTCDay()+6)%7;
+}
+
+function cfiSpark(M){
+  const pts=M.days.filter(x=>!x.before && !x.future && x.bal!==undefined);
+  if(pts.length<2) return "";
+  const vals=pts.map(x=>x.bal);
+  const lo=Math.min(...vals), hi=Math.max(...vals), span=(hi-lo)||1;
+  const d=pts.map((x,i)=>`${(i/(pts.length-1)*100).toFixed(2)},${(34-((x.bal-lo)/span)*30).toFixed(2)}`).join(" ");
+  const up=vals[vals.length-1]>=vals[0];
+  return `<svg class="spark" viewBox="0 0 100 38" preserveAspectRatio="none" aria-hidden="true">
+    <polyline points="${d}" fill="none" stroke="${up?"var(--in)":"var(--out)"}" stroke-width="1.4"
+      vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`;
+}
+
+function viewCfi(){
+  cfiInit();
+  const all=cfiBuild(), keys=cfiRange();
+  if(cfiMonth>=keys.length) cfiMonth=keys.length-1;
+  if(cfiMonth<0) cfiMonth=0;
+  const mk=keys[cfiMonth], M=all[mk], target=Number(state.cfi.target)||0;
+  const hit=target>0?Math.min(100,Math.max(0,M.pct/target*100)):0;
+  const need=target>0 ? (M.avg*target/100)-M.profit : 0;
+  const maxAbs=Math.max(1,...M.days.filter(x=>!x.before).map(x=>Math.abs(x.pnl||0)));
+  const today=todayISO();
+
+  const cells=[];
+  for(let i=0;i<cfiOffset(mk);i++) cells.push(`<div class="cell pad"></div>`);
+  M.days.forEach(x=>{
+    if(x.before){ cells.push(`<div class="cell pad"><span class="dd">${x.d}</span></div>`); return; }
+    const p=x.pnl||0;
+    const lvl=p===0?0:Math.min(4,Math.ceil(Math.abs(p)/maxAbs*4));
+    const wknd=[5,6].includes((cfiOffset(mk)+x.d-1)%7);
+    const flag=(x.flows||[]).length?`<span class="fl">${x.flows.some(f=>f.kind==="deposit")?"▲":"▼"}</span>`:"";
+    cells.push(`<button class="cell ${p>0?"up":p<0?"down":""} l${lvl} ${wknd?"wknd":""} ${x.date===today?"now":""} ${x.future?"fut":""}"
+      data-cfiday="${x.date}" aria-label="${dayLabel(x.date)} ${p?money(p):"no entry"}">
+      <span class="dd">${x.d}</span>${flag}
+      <span class="pl">${p?money(p):""}</span></button>`);
+  });
+
+  return `
+    <div class="monthbar">
+      <button class="navbtn" id="cfi-prev" ${cfiMonth===0?"disabled":""}>‹</button>
+      <h1>${monthLabel(mk)}</h1>
+      <button class="navbtn" id="cfi-next" ${cfiMonth===keys.length-1?"disabled":""}>›</button>
+    </div>
+
+    <div class="top">
+      <h1>${M.profit>=0?"Profit This Month":"Loss This Month"}</h1>
+      <div class="figure ${M.profit<0?"neg":"pos"}">${signed(M.profit)}<span class="cur">AED</span></div>
+      <p class="lead">${M.pct>=0?"+":""}${M.pct.toFixed(2)}% on average capital of ${money(M.avg)}.
+        ${target>0?(need>0?`<strong>${money(need)}</strong> more to reach ${target}%.`:`Target of ${target}% <strong>reached</strong>.`):""}</p>
+      ${target>0?`<div class="goal"><div class="bar"><span style="width:${hit}%;background:${M.pct<0?"var(--out)":hit>=100?"var(--in)":"var(--warn)"}"></span></div>
+        <div class="goalends"><span>0%</span><span>${target}% target</span></div></div>`:""}
+      ${cfiSpark(M)}
+    </div>
+
+    <section>
+      <h2>The Month, Day by Day</h2>
+      <p class="sub">Tap any day to log what you made or lost. Shaded by size. ▲ deposit, ▼ withdrawal.</p>
+      <div class="week">${["M","T","W","T","F","S","S"].map(d=>`<span>${d}</span>`).join("")}</div>
+      <div class="cal">${cells.join("")}</div>
+    </section>
+
+    <section>
+      <h2>Where It Stands</h2>
+      <div class="row"><span class="name"><span class="n">Opening balance</span><span class="d">start of ${monthLabel(mk)}</span></span><span class="v num">${money(M.opening)}</span></div>
+      <div class="row"><span class="name"><span class="n">Average capital</span><span class="d">what the % is measured against</span></span><span class="v num">${money(M.avg)}</span></div>
+      <div class="row"><span class="name"><span class="n">Deposits in</span></span><span class="v in num">${M.dep?signed(M.dep):"—"}</span></div>
+      <div class="row"><span class="name"><span class="n">Withdrawals out</span></span><span class="v out num">${M.wd?signed(-M.wd):"—"}</span></div>
+      <div class="row"><span class="name"><span class="n">Balance now</span><span class="d">after profit and flows</span></span><span class="v num">${money(M.closing)}</span></div>
+      ${(M.wins+M.losses)?`<div class="row"><span class="name"><span class="n">Days traded</span><span class="d">${M.wins} up · ${M.losses} down</span></span><span class="v num">${M.wins+M.losses}</span></div>`:""}
+      ${M.best?`<div class="row"><span class="name"><span class="n">Best day</span><span class="d">${M.best.d} ${monthLabel(mk).split(" ")[0]}</span></span><span class="v in num">${signed(M.best.p)}</span></div>`:""}
+      ${M.worst&&M.worst.p<0?`<div class="row"><span class="name"><span class="n">Worst day</span><span class="d">${M.worst.d} ${monthLabel(mk).split(" ")[0]}</span></span><span class="v out num">${signed(M.worst.p)}</span></div>`:""}
+    </section>
+
+    <section>
+      <h2>Deposits and Withdrawals</h2>
+      ${(() => {
+        const fl=state.cfi.flows.filter(f=>monthOf(f.date)===mk).sort((a,b)=>a.date<b.date?-1:1);
+        if(!fl.length) return `<div class="empty">Nothing moved in or out this month.</div>`;
+        return fl.map(f=>`<div class="row">
+          <span class="name"><span class="n">${f.kind==="deposit"?"Deposit":"Withdrawal"}</span>
+            <span class="d">${dayLabel(f.date)}${f.note?" · "+esc(f.note):""}</span></span>
+          <span class="v ${f.kind==="deposit"?"in":"out"}">${signed(f.kind==="deposit"?Math.abs(f.amount):-Math.abs(f.amount))}</span>
+          <button class="del" data-cfidelflow="${f.id}" aria-label="Remove">×</button>
+        </div>`).join("");
+      })()}
+      <button class="btn wide" id="cfi-addflow">Record a deposit or withdrawal</button>
+    </section>
+
+    <section>
+      <h2>Month by Month</h2>
+      <p class="sub">Return against average capital, against your ${target}% target.</p>
+      ${keys.slice().reverse().map((k,i)=>{
+        const m=all[k], w=target>0?Math.min(100,Math.abs(m.pct)/target*100):0;
+        return `<button class="mrow ${k===mk?"cur":""}" data-cfijump="${keys.indexOf(k)}">
+          <span class="ml">${monthLabel(k)}</span>
+          <span class="mbar"><span style="width:${w}%;background:${m.pct<0?"var(--out)":m.pct>=target?"var(--in)":"var(--warn)"}"></span></span>
+          <span class="mv ${m.pct<0?"neg":"pos"}">${m.pct>=0?"+":""}${m.pct.toFixed(1)}%</span>
+          <span class="ma">${signed(m.profit)}</span>
+        </button>`;
+      }).join("")}
+    </section>`;
+}
+
+function openCfiDay(date){
+  cfiInit();
+  const cur=Number(state.cfi.pnl[date])||0;
+  cfiSign = cur<0 ? "loss" : "profit";
+  const draw=()=>{
+    openSheet(`
+      <h2>${dayLabel(date)}</h2>
+      <div class="seg" style="margin-bottom:14px">
+        <button data-sign="profit" class="${cfiSign==="profit"?"on":""}">Profit</button>
+        <button data-sign="loss" class="${cfiSign==="loss"?"on":""}">Loss</button>
+      </div>
+      <input class="bigin" id="cf-amt" type="number" step="0.01" inputmode="decimal"
+             placeholder="0" value="${cur?Math.abs(cur):""}">
+      <div class="chips">
+        <button class="chip" data-cfbump="100">+100</button>
+        <button class="chip" data-cfbump="500">+500</button>
+        <button class="chip" data-cfbump="1000">+1,000</button>
+        <button class="chip" data-cfbump="0">Clear</button>
+      </div>
+      <button class="btn solid wide" id="cf-save">Save</button>
+      ${cur?`<button class="btn wide danger" id="cf-del">Remove this day</button>`:""}
+      <button class="btn wide" data-close>Cancel</button>
+    `);
+    const p=document.getElementById("panel");
+    const amt=p.querySelector("#cf-amt");
+    p.querySelectorAll("[data-sign]").forEach(b=>b.onclick=()=>{
+      const v=amt.value; cfiSign=b.dataset.sign; draw();
+      const a=document.getElementById("cf-amt"); if(a) a.value=v;
+    });
+    p.querySelectorAll("[data-cfbump]").forEach(b=>b.onclick=()=>{
+      const inc=Number(b.dataset.cfbump);
+      amt.value = inc===0 ? "" : String((Number(amt.value)||0)+inc);
+    });
+    p.querySelector("#cf-save").onclick=()=>{
+      const v=Math.abs(Number(amt.value)||0);
+      if(!v){ delete state.cfi.pnl[date]; }
+      else state.cfi.pnl[date] = cfiSign==="loss" ? -v : v;
+      save(); closeSheet(); render();
+      toast(v?(cfiSign==="loss"?"Loss of ":"Profit of ")+money(v)+" on "+dayLabel(date):"Day cleared");
+    };
+    if(p.querySelector("#cf-del")) p.querySelector("#cf-del").onclick=()=>{
+      delete state.cfi.pnl[date]; save(); closeSheet(); render(); toast("Removed");
+    };
+    bindClose();
+    setTimeout(()=>{ const a=document.getElementById("cf-amt"); if(a) a.focus(); },60);
+  };
+  draw();
+}
+
+function openCfiFlow(){
+  cfiInit();
+  let kind="deposit";
+  const draw=()=>{
+    openSheet(`
+      <h2>Money In or Out</h2>
+      <div class="seg" style="margin-bottom:14px">
+        <button data-fk="deposit" class="${kind==="deposit"?"on":""}">Deposit</button>
+        <button data-fk="withdrawal" class="${kind==="withdrawal"?"on":""}">Withdrawal</button>
+      </div>
+      <input class="bigin" id="fl-amt" type="number" step="0.01" inputmode="decimal" placeholder="0">
+      <input class="text" id="fl-note" type="text" placeholder="Note (optional)">
+      <div class="field"><label for="fl-date">Date</label><input id="fl-date" type="date" value="${todayISO()}"></div>
+      <p class="hint">This moves your capital, not your profit. The percentage is measured against average capital, so a mid-month deposit only counts for the days it was actually working.</p>
+      <button class="btn solid wide" id="fl-save">Save</button>
+      <button class="btn wide" data-close>Cancel</button>
+    `);
+    const p=document.getElementById("panel");
+    p.querySelectorAll("[data-fk]").forEach(b=>b.onclick=()=>{
+      const v=p.querySelector("#fl-amt").value, n=p.querySelector("#fl-note").value, d=p.querySelector("#fl-date").value;
+      kind=b.dataset.fk; draw();
+      const q=document.getElementById("panel");
+      q.querySelector("#fl-amt").value=v; q.querySelector("#fl-note").value=n; q.querySelector("#fl-date").value=d;
+    });
+    p.querySelector("#fl-save").onclick=()=>{
+      const v=Math.abs(Number(p.querySelector("#fl-amt").value)||0);
+      if(!v){ toast("Enter an amount"); return; }
+      state.cfi.flows.push({ id:"cf"+Date.now(), date:p.querySelector("#fl-date").value,
+                             amount:v, kind, note:p.querySelector("#fl-note").value.trim() });
+      save(); closeSheet(); render();
+      toast((kind==="deposit"?"Deposited ":"Withdrew ")+money(v));
+    };
+    bindClose();
+    setTimeout(()=>{ const a=document.getElementById("fl-amt"); if(a) a.focus(); },60);
+  };
+  draw();
+}
+
+/* ==========================================================
    RENDER
    ========================================================== */
-let state=null, tab="today", curMonth=0, months=null;
+let state=null, tab="today", lastTab="today", curMonth=0, cfiMonth=0, cfiSign="profit", months=null;
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
 function applyTheme(){
@@ -755,13 +1018,20 @@ function render(){
   extendHorizon();
   months=build();
   const app=document.getElementById("app");
-  app.innerHTML = tab==="today"?viewToday() : tab==="log"?viewLog() : tab==="months"?viewMonths() : viewSetup();
-  document.getElementById("tabs").innerHTML=["today","log","months","setup"].map(t=>
+  app.innerHTML = tab==="today"?viewToday() : tab==="log"?viewLog() : tab==="months"?viewMonths() : tab==="cfi"?viewCfi() : viewSetup();
+  document.getElementById("tabs").innerHTML=["today","log","months","cfi"].map(t=>
     `<button data-tab="${t}" class="${tab===t?"on":""}">
-       <span class="g">${{today:"◉",log:"≡",months:"▤",setup:"⚙"}[t]}</span>
-       ${{today:"Today",log:"Log",months:"Months",setup:"Setup"}[t]}
+       <span class="g">${{today:"◉",log:"≡",months:"▤",cfi:"◫"}[t]}</span>
+       ${{today:"Today",log:"Log",months:"Months",cfi:"CFI"}[t]}
      </button>`).join("");
-  document.getElementById("fab").style.display = (tab==="today"||tab==="log") ? "block" : "none";
+
+  document.getElementById("appbar").innerHTML = tab==="setup"
+    ? `<button class="back" id="ab-back">‹ Back</button><span class="title">Setup</span>`
+    : `<span class="title">${{today:"Today",log:"Log",months:"Months",cfi:"CFI Profit Tracker"}[tab]}</span>
+       <button class="icon" id="ab-menu" aria-label="Open setup">⋯</button>`;
+  const fabEl=document.getElementById("fab");
+  fabEl.style.display = (tab==="today"||tab==="log"||tab==="cfi") ? "block" : "none";
+  fabEl.textContent = tab==="cfi" ? "+ Log today's P/L" : "+ Log entry";
   wire();
 }
 
@@ -942,7 +1212,7 @@ function tape(mk,M,today){
 function viewSetup(){
   const keys=monthKeys(), mk=keys[curMonth];
   return `
-    <div class="top"><h1>Setup</h1><div class="when">Self-hosted build \u00b7 v3</div></div>
+    <div class="top" style="padding-bottom:0"><div class="when">Self-hosted build \u00b7 v3</div></div>
 
     <section>
       <h2>Appearance</h2>
@@ -952,6 +1222,18 @@ function viewSetup(){
         <button data-theme-set="light" class="${state.theme==="light"?"on":""}">Light</button>
         <button data-theme-set="dark" class="${state.theme==="dark"?"on":""}">Dark</button>
       </div>
+    </section>
+
+    <section>
+      <h2>CFI Account</h2>
+      <p class="sub">The broker balance when you started tracking, and the return you're aiming for each month.</p>
+      <div class="field"><label for="cfi-open">Starting balance</label>
+        <input id="cfi-open" type="number" step="0.01" inputmode="decimal" value="${(state.cfi&&state.cfi.opening)||0}"></div>
+      <div class="field"><label for="cfi-date">Tracking from</label>
+        <input id="cfi-date" type="date" value="${(state.cfi&&state.cfi.openingDate)||todayISO()}"></div>
+      <div class="field"><label for="cfi-target">Monthly target %</label>
+        <input id="cfi-target" type="number" step="0.1" inputmode="decimal" value="${(state.cfi&&state.cfi.target)||0}"></div>
+      <p class="hint">The percentage is measured against your average capital for the month, so deposits and withdrawals part-way through are weighted by the days they were actually in the account.</p>
     </section>
 
     <section>
@@ -1113,6 +1395,17 @@ function wire(){
   const on=(sel,fn)=>document.querySelectorAll(sel).forEach(fn);
 
   on("[data-tab]",b=>b.onclick=()=>{ tab=b.dataset.tab; render(); window.scrollTo(0,0); });
+  on("[data-cfiday]",b=>b.onclick=()=>openCfiDay(b.dataset.cfiday));
+  on("[data-cfijump]",b=>b.onclick=()=>{ cfiMonth=Number(b.dataset.cfijump); render(); window.scrollTo(0,0); });
+  on("[data-cfidelflow]",b=>b.onclick=()=>{
+    state.cfi.flows=state.cfi.flows.filter(f=>f.id!==b.dataset.cfidelflow);
+    save(); render(); toast("Removed");
+  });
+  if($("cfi-prev")) $("cfi-prev").onclick=()=>{ cfiMonth=Math.max(0,cfiMonth-1); render(); window.scrollTo(0,0); };
+  if($("cfi-next")) $("cfi-next").onclick=()=>{ cfiMonth=Math.min(cfiRange().length-1,cfiMonth+1); render(); window.scrollTo(0,0); };
+  if($("cfi-addflow")) $("cfi-addflow").onclick=openCfiFlow;
+  if($("ab-menu")) $("ab-menu").onclick=()=>{ lastTab=tab; tab="setup"; render(); window.scrollTo(0,0); };
+  if($("ab-back")) $("ab-back").onclick=()=>{ tab=lastTab||"today"; render(); window.scrollTo(0,0); };
   on("[data-jump]",b=>b.onclick=()=>{ curMonth=Number(b.dataset.jump); render(); window.scrollTo(0,0); });
   if($("prev")) $("prev").onclick=()=>{ curMonth=Math.max(0,curMonth-1); render(); window.scrollTo(0,0); };
   if($("next")) $("next").onclick=()=>{ curMonth=Math.min(monthKeys().length-1,curMonth+1); render(); window.scrollTo(0,0); };
@@ -1175,6 +1468,9 @@ function wire(){
     save(); render();
   });
 
+  if($("cfi-open")) $("cfi-open").onchange=e=>{ cfiInit(); state.cfi.opening=Number(e.target.value)||0; save(); render(); };
+  if($("cfi-date")) $("cfi-date").onchange=e=>{ cfiInit(); state.cfi.openingDate=e.target.value; save(); render(); };
+  if($("cfi-target")) $("cfi-target").onchange=e=>{ cfiInit(); state.cfi.target=Math.max(0,Number(e.target.value)||0); save(); render(); };
   if($("a-bal")) $("a-bal").onchange=e=>{ state.anchor.balance=Number(e.target.value)||0; save(); render(); };
   if($("a-date")) $("a-date").onchange=e=>{ state.anchor.date=e.target.value; save(); render(); };
   if($("fillbudget")) $("fillbudget").onclick=()=>{
@@ -1238,6 +1534,8 @@ function wire(){
       state.income.forEach(it=>{
     if(it.count===undefined) it.count = !(it.id==="i2"||it.id==="i3");   // salary and the repayments start off
   });
+  cfiInit();
+  cfiMonth=Math.max(0,cfiRange().indexOf(monthOf(todayISO())));
   if(!state.theme) state.theme="auto";
       applyTheme(); save(); render(); toast("Restored");
     }catch(e){ toast("That doesn't look like a backup"); }
@@ -1585,7 +1883,7 @@ function fallbackCopy(text,done){
 /* ==========================================================
    BOOT
    ========================================================== */
-document.getElementById("fab").onclick=openAdd;
+document.getElementById("fab").onclick=()=>{ if(tab==="cfi") openCfiDay(todayISO()); else openAdd(); };
 document.getElementById("sheet").querySelector(".scrim").onclick=closeSheet;
 
 function fatal(err){
@@ -1601,6 +1899,7 @@ function fatal(err){
     if(navigator.clipboard) navigator.clipboard.writeText(text).then(()=>toast("Backed up"),()=>{});
   };
   const fab=document.getElementById("fab"); if(fab) fab.style.display="none";
+  const ab=document.getElementById("appbar"); if(ab) ab.innerHTML=`<span class="title">Cash Flow</span>`;
 }
 
 (async function(){
@@ -1615,6 +1914,8 @@ function fatal(err){
   state.income.forEach(it=>{
     if(it.count===undefined) it.count = !(it.id==="i2"||it.id==="i3");   // salary and the repayments start off
   });
+  cfiInit();
+  cfiMonth=Math.max(0,cfiRange().indexOf(monthOf(todayISO())));
   if(!state.theme) state.theme="auto";
   extendHorizon();
   const here=monthKeys().indexOf(monthOf(todayISO()));
