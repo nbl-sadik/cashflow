@@ -234,7 +234,7 @@ function defaultState(){
     v:2,
     startMonth:s,
     anchor:{ balance:14288.56, date:"2026-09-05" },
-    dailySpend:0,
+    budgets:{},
     countIncome:true,
     income:[
       {id:"i1",name:"BOGUS BT Citi ATE (less deem)",day:1,amounts:spread(s,[6200,6200,6200,8000,8000,0,0,0,0,0,0,0])},
@@ -301,6 +301,41 @@ function extendHorizon(){
 }
 
 /* ---------- the engine ---------- */
+/* ---------- monthly spending budgets ---------- */
+function budgetSum(){
+  const b=state.budgets||{};
+  return Object.keys(b).reduce((s,k)=>s+(Number(b[k])||0),0);
+}
+/** Everything logged that is not a scheduled item and not a correction. */
+function spentByCat(mk){
+  const o={};
+  state.tx.forEach(t=>{
+    if(t.amount<0 && !t.link && !t.adj && monthOf(t.date)===mk){
+      const c=t.cat||"Other"; o[c]=(o[c]||0)+Math.abs(t.amount);
+    }
+  });
+  return o;
+}
+function unplannedSpent(mk){
+  const o=spentByCat(mk);
+  return Object.keys(o).reduce((s,k)=>s+o[k],0);
+}
+/**
+ * What the forecast should drain per day in a given month.
+ * This month: whatever is left of the budget, over the days that remain.
+ * Later months: the whole budget, spread evenly.
+ */
+function dailyDrain(mk,dim){
+  const total=budgetSum();
+  if(total<=0) return 0;
+  const today=todayISO(), nowM=monthOf(today);
+  if(mk>nowM) return total/dim;
+  if(mk<nowM) return 0;
+  const left=Math.max(0,total-unplannedSpent(mk));
+  const daysLeft=dim-Number(today.slice(8));
+  return daysLeft>0 ? left/daysLeft : 0;
+}
+
 /** How much of a planned item has actually been logged this month. */
 function receivedFor(id,mk){
   return state.tx.reduce((s,t)=>
@@ -330,7 +365,7 @@ function balanceNow(){
  * planned items plus the day-to-day spending rate.
  */
 function build(){
-  const today=todayISO(), rate=Number(state.dailySpend)||0;
+  const today=todayISO();
   const byDate={};
   state.tx.forEach(t=>{ (byDate[t.date]=byDate[t.date]||[]).push(t); });
 
@@ -339,12 +374,13 @@ function build(){
 
   for(const mk of monthKeys()){
     const dim=daysInMonth(mk), rows=[], opening=bal;
+    const rate=dailyDrain(mk,dim);
     let lowest=bal, lowDate=null, dipDate=null, pend=0, pendDays=0, plannedIn=0, plannedOut=0, actualIn=0, actualOut=0;
 
     const flush=(d)=>{
       if(pend<=0) return;
       bal-=pend;
-      rows.push({cls:"drip plan",day:d,name:"Day-to-day spending, "+pendDays+" day"+(pendDays>1?"s":""),
+      rows.push({cls:"drip plan",day:d,name:"Budgeted spending, "+pendDays+" day"+(pendDays>1?"s":""),
                  amount:-pend,balance:bal,future:true});
       if(bal<lowest){lowest=bal;lowDate=iso(mk,d);}
       if(dipDate===null && bal<0) dipDate=iso(mk,d);
@@ -454,13 +490,6 @@ function outlook(days){
   });
   if(low===Infinity){ low=balanceNow(); at=null; }
   return {low,at,dip};
-}
-function avgDailySpend(){
-  const un=state.tx.filter(t=>t.amount<0 && !t.link && !t.adj);
-  if(un.length<3) return null;
-  const dates=un.map(t=>t.date).sort();
-  const span=Math.max(1,daysBetween(dates[0],todayISO())+1);
-  return Math.round(un.reduce((s,t)=>s-t.amount,0)/span);
 }
 
 /* ==========================================================
@@ -799,11 +828,28 @@ function viewToday(){
     </section>
 
     <section>
-      <h2>Day-to-day spending</h2>
-      <p class="sub">Everything you log that isn't a card, loan or planned income.</p>
-      <div class="row"><span class="name"><span class="n">This month so far</span><span class="d">${monthLabel(mk)}</span></span><span class="v out">${money(spentMonth)}</span></div>
-      <div class="row"><span class="name"><span class="n">Rate used in the forecast</span><span class="d">${state.dailySpend>0?"per day":"not set — forecast assumes zero"}</span></span><span class="v">${state.dailySpend>0?money(state.dailySpend)+"/day":"—"}</span></div>
-      ${avgDailySpend()!==null?`<button class="btn wide" id="useavg">Use my actual average, ${money(avgDailySpend())}/day</button>`:""}
+      <h2>Spending budget</h2>
+      <p class="sub">${budgetSum()>0
+        ? `${monthLabel(mk)} · ${money(spentMonth)} of ${money(budgetSum())} used, ${money(Math.max(0,budgetSum()-spentMonth))} left over ${Math.max(0,daysInMonth(mk)-Number(t.slice(8)))} day${daysInMonth(mk)-Number(t.slice(8))===1?"":"s"}.`
+        : `No budget set, so the forecast assumes you spend nothing between card payments. Set one in Setup.`}</p>
+      ${budgetSum()>0?`<div class="bar"><span style="width:${Math.min(100,Math.round(spentMonth/budgetSum()*100))}%;background:${spentMonth>budgetSum()?"var(--out)":"var(--in)"}"></span></div>`:""}
+      ${(()=>{
+        const spent=spentByCat(mk), b=state.budgets||{};
+        const cats=[...new Set([...Object.keys(b).filter(k=>Number(b[k])>0),...Object.keys(spent)])]
+                    .sort((x,y)=>(spent[y]||0)-(spent[x]||0));
+        if(!cats.length) return "";
+        return cats.map(c=>{
+          const used=spent[c]||0, bud=Number(b[c])||0;
+          const pct=bud>0?Math.min(100,Math.round(used/bud*100)):0;
+          const over=bud>0&&used>bud;
+          return `<div class="row">
+            <span class="name"><span class="n">${esc(c)}</span>
+              <span class="d">${bud>0?`${money(used)} of ${money(bud)}${over?" · over":""}`:`${money(used)} · no budget`}</span>
+              ${bud>0?`<span class="bar mini"><span style="width:${pct}%;background:${over?"var(--out)":"var(--in)"}"></span></span>`:""}</span>
+            <span class="v ${over?"out":""}">${bud>0?money(Math.max(0,bud-used)):"—"}</span>
+          </div>`;
+        }).join("");
+      })()}
     </section>
 
     <section>
@@ -914,10 +960,22 @@ function viewSetup(){
     </section>
 
     <section>
-      <h2>Day-to-day spending</h2>
-      <p class="sub">What leaves your account on an ordinary day — food, fuel, everything not on a schedule. The forecast drains this daily.</p>
-      <div class="field"><label for="s-rate">Per day</label><input id="s-rate" type="number" inputmode="decimal" value="${state.dailySpend}"></div>
-      <p class="hint">Leave at 0 and the forecast assumes you spend nothing between card payments, which is the flaw in the original spreadsheet.</p>
+      <h2>Monthly spending budget</h2>
+      <p class="sub">What you expect to spend in each category in a normal month. These repeat every month and the forecast drains them day by day. Leave a category blank if you don't want to budget it.</p>
+      ${CATS.map(c=>`<div class="row">
+        <span class="name"><span class="n">${esc(c)}</span></span>
+        <input class="amt" type="number" step="0.01" inputmode="decimal" placeholder="0"
+               value="${(state.budgets&&state.budgets[c])||""}" data-budget="${esc(c)}">
+      </div>`).join("")}
+      <div class="totrow"><span>Total per month</span><span class="v num">${money(budgetSum())}</span></div>
+      ${(()=>{
+        const nowM=monthOf(todayISO()), prev=addMonths(nowM,-1);
+        const src=Object.keys(spentByCat(prev)).length?prev:nowM;
+        return Object.keys(spentByCat(src)).length
+          ? `<button class="btn wide" id="fillbudget" data-src="${src}">Fill from what I actually spent in ${monthLabel(src)}</button>`
+          : "";
+      })()}
+      <p class="hint">Anything you log against a category counts toward its budget. What's left is spread over the days remaining, so the forecast tightens as you spend and eases if you don't.</p>
     </section>
 
     <section>
@@ -1098,8 +1156,22 @@ function wire(){
 
   if($("a-bal")) $("a-bal").onchange=e=>{ state.anchor.balance=Number(e.target.value)||0; save(); render(); };
   if($("a-date")) $("a-date").onchange=e=>{ state.anchor.date=e.target.value; save(); render(); };
-  if($("s-rate")) $("s-rate").onchange=e=>{ state.dailySpend=Math.max(0,Number(e.target.value)||0); save(); render(); };
-  if($("useavg")) $("useavg").onclick=()=>{ state.dailySpend=avgDailySpend(); save(); render(); toast("Forecast updated"); };
+  if($("fillbudget")) $("fillbudget").onclick=()=>{
+    const src=$("fillbudget").dataset.src, o=spentByCat(src);
+    const cats=Object.keys(o);
+    if(!cats.length){ toast("Nothing logged in that month"); return; }
+    if(!confirm("Replace the budgets above with what you actually spent in "+monthLabel(src)+"?")) return;
+    state.budgets={};
+    cats.forEach(c=>{ const v=Math.round(o[c]); if(v>0) state.budgets[c]=v; });
+    save(); render(); toast("Budgets set from "+monthLabel(src));
+  };
+
+  on("[data-budget]",el=>el.onchange=()=>{
+    if(!state.budgets) state.budgets={};
+    const c=el.dataset.budget, v=Number(el.value);
+    if(!v||v<=0) delete state.budgets[c]; else state.budgets[c]=v;
+    save(); render();
+  });
   if($("reconcile")) $("reconcile").onclick=openReconcile;
   if($("add-in")) $("add-in").onclick=()=>addItem("in");
   if($("add-out")) $("add-out").onclick=()=>addItem("out");
