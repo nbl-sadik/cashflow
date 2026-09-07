@@ -68,6 +68,7 @@
   .top .when{font-size:12.5px;color:var(--muted);margin-top:2px}
 
   .figure{font-size:42px;font-weight:600;letter-spacing:-.03em;line-height:1.02;margin-top:10px}
+  .figure .lbl{font-size:15px;font-weight:500;color:var(--muted);margin-right:10px;letter-spacing:0}
   .figure .cur{font-size:16px;font-weight:500;color:var(--muted);margin-left:6px;letter-spacing:0}
   .neg{color:var(--out)} .pos{color:var(--in)}
   .lead{font-size:13.5px;color:var(--muted);margin:8px 0 0}
@@ -787,9 +788,9 @@ function viewToday(){
 
   return `
     <div class="top">
-      <h1>Balance now</h1>
+      <h1>Spend Less Nabil !!</h1>
       <div class="when">${dayLabel(t)} · updates as you log</div>
-      <div class="figure ${bal<0?"neg":""}">${money(bal)}<span class="cur">AED</span></div>
+      <div class="figure ${bal<0?"neg":""}"><span class="lbl">Balance</span>${money(bal)}<span class="cur">AED</span></div>
       <p class="lead">${
         o.at
           ? (o.low<0 && o.dip
@@ -800,35 +801,35 @@ function viewToday(){
     </div>
 
     ${storeMode==="none"?`<div class="card alert">
-      <h3>Nothing is being saved</h3>
+      <h3>Nothing Is Being Saved</h3>
       <p>This copy can't store data. Enter what you like, but use Setup → Back up my data before you close, or it's gone.</p>
     </div>`:""}
 
     ${o.low<0?`<div class="card alert">
-      <h3>Below zero from ${o.dip?dayLabel(o.dip):dayLabel(o.at)}</h3>
+      <h3>Below Zero From ${o.dip?dayLabel(o.dip):dayLabel(o.at)}</h3>
       <p>Bottoms out at ${money(o.low)} on ${dayLabel(o.at)}. Move a payment, bring income forward, or tick income you know is coming.</p>
     </div>`:""}
 
     ${waiting.length?`<section>
-      <h2>Needs ticking</h2>
+      <h2>Needs Ticking</h2>
       <p class="sub">Due already, not recorded yet — so the balance above ignores ${waiting.length>1?"them":"it"}. Tap a name to log a different amount.</p>
       ${waiting.map(x=>plannedRow(x,dayLabel(x.date))).join("")}
     </section>`:""}
 
     ${recent.length?`<section>
-      <h2>Just settled</h2>
+      <h2>Just Settled</h2>
       <p class="sub">Last four days. Tap the tick to undo one.</p>
       ${recent.map(x=>plannedRow(x,dayLabel(x.date))).join("")}
     </section>`:""}
 
     <section>
-      <h2>Coming up</h2>
+      <h2>Coming Up</h2>
       <p class="sub">Next 10 days. Tick anything that lands early and the balance moves today.${ignoring?` <strong>Expected income is switched off in Setup</strong>, so the green amounts below are not in the forecast.`:""}</p>
       ${up.length?up.map(x=>plannedRow(x,dayLabel(x.date)+" · in "+daysBetween(todayISO(),x.date)+" day"+(daysBetween(todayISO(),x.date)>1?"s":"")+(x.done?" · already logged":"")+(x.kind==="in"&&ignoring?" · not counted":""))).join(""):`<div class="empty">Nothing scheduled.</div>`}
     </section>
 
     <section>
-      <h2>Spending budget</h2>
+      <h2>Spending Budget</h2>
       <p class="sub">${budgetSum()>0
         ? `${monthLabel(mk)} · ${money(spentMonth)} of ${money(budgetSum())} used, ${money(Math.max(0,budgetSum()-spentMonth))} left over ${Math.max(0,daysInMonth(mk)-Number(t.slice(8)))} day${daysInMonth(mk)-Number(t.slice(8))===1?"":"s"}.`
         : `No budget set, so the forecast assumes you spend nothing between card payments. Set one in Setup.`}</p>
@@ -853,7 +854,7 @@ function viewToday(){
     </section>
 
     <section>
-      <h2>Check against your bank</h2>
+      <h2>Check Against Your Bank</h2>
       <p class="sub">Logging always drifts. Type what your banking app says and this records the difference.</p>
       <button class="btn wide" id="reconcile">Reconcile balance</button>
     </section>`;
@@ -891,7 +892,7 @@ function viewMonths(){
       <button class="navbtn" id="next" ${curMonth===keys.length-1?"disabled":""}>›</button>
     </div>
     <div class="top">
-      <h1>${short?"Lowest point":"Closing balance"}</h1>
+      <h1>${short?"Lowest Point":"Closing Balance"}</h1>
       <div class="figure ${short?"neg":"pos"}">${money(short?M.lowest:M.closing)}<span class="cur">AED</span></div>
       <p class="lead">${!short
         ? `Stays positive all month. Opened at ${money(M.opening)}.`
@@ -900,7 +901,7 @@ function viewMonths(){
           : `Starts the month already below zero. Lowest ${money(M.lowest)} on ${dayLabel(M.lowDate)}. Closing ${money(M.closing)}.`}</p>
     </div>
     <section>
-      <h2>How the month runs</h2>
+      <h2>How the Month Runs</h2>
       <p class="sub">Solid marks are logged. Faint ones are still planned.</p>
       ${tape(mk,M,today)}
     </section>
@@ -912,7 +913,7 @@ function viewMonths(){
       <div class="row"><span class="name"><span class="n">Still expected out</span></span><span class="v out">${money(M.plannedOut)}</span></div>
     </section>
     <section>
-      <h2>The year ahead</h2>
+      <h2>The Year Ahead</h2>
       <p class="sub">Closing balance each month, twelve months ahead. Scroll sideways.</p>
       <div class="strip">${keys.map((k,i)=>`<button class="mcell ${i===curMonth?"cur":""}" data-jump="${i}">
         <span class="m">${monthLabel(k,true)}</span>
@@ -952,7 +953,7 @@ function viewSetup(){
     </section>
 
     <section>
-      <h2>Starting point</h2>
+      <h2>Starting Point</h2>
       <p class="sub">The one balance you enter by hand. Everything after this date comes from your log.</p>
       <div class="field"><label for="a-bal">Balance</label><input id="a-bal" type="number" step="0.01" inputmode="decimal" value="${state.anchor.balance}"></div>
       <div class="field"><label for="a-date">On</label><input id="a-date" type="date" value="${state.anchor.date}"></div>
@@ -960,13 +961,22 @@ function viewSetup(){
     </section>
 
     <section>
-      <h2>Monthly spending budget</h2>
+      <h2>Monthly Spending Budget</h2>
       <p class="sub">What you expect to spend in each category in a normal month. These repeat every month and the forecast drains them day by day. Leave a category blank if you don't want to budget it.</p>
-      ${CATS.map(c=>`<div class="row">
-        <span class="name"><span class="n">${esc(c)}</span></span>
-        <input class="amt" type="number" step="0.01" inputmode="decimal" placeholder="0"
-               value="${(state.budgets&&state.budgets[c])||""}" data-budget="${esc(c)}">
-      </div>`).join("")}
+      <div class="picker">
+        <select id="b-cat" aria-label="Category">${CATS.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join("")}</select>
+        <input class="amt" id="b-amt" type="number" step="0.01" inputmode="decimal" placeholder="0" aria-label="Monthly amount">
+        <button class="btn mini" id="b-set">Set</button>
+      </div>
+      ${(()=>{
+        const b=state.budgets||{}, keys=Object.keys(b).filter(k=>Number(b[k])>0).sort((x,y)=>b[y]-b[x]);
+        if(!keys.length) return `<div class="empty">No budgets set yet.</div>`;
+        return keys.map(c=>`<div class="row">
+          <span class="name tap" data-pickbudget="${esc(c)}"><span class="n">${esc(c)}</span></span>
+          <span class="v num">${money(b[c])}</span>
+          <button class="del" data-delbudget="${esc(c)}" aria-label="Remove the ${esc(c)} budget">×</button>
+        </div>`).join("");
+      })()}
       <div class="totrow"><span>Total per month</span><span class="v num">${money(budgetSum())}</span></div>
       ${(()=>{
         const nowM=monthOf(todayISO()), prev=addMonths(nowM,-1);
@@ -979,7 +989,7 @@ function viewSetup(){
     </section>
 
     <section>
-      <h2>Expected income</h2>
+      <h2>Expected Income</h2>
       <p class="sub">Whether the forecast counts income that hasn't arrived yet.</p>
       <div class="seg">
         <button data-ci="1" class="${state.countIncome?"on":""}">Count it</button>
@@ -989,7 +999,7 @@ function viewSetup(){
     </section>
 
     <section>
-      <h2>Scheduled items · ${monthLabel(mk)}</h2>
+      <h2>Scheduled Items · ${monthLabel(mk)}</h2>
       <p class="sub">Tap a name to rename it or change its due day. Amounts are per month — move between months with the arrows below.</p>
       <div class="btnrow" style="margin:0 0 10px">
         <button class="btn mini" id="prev2" ${curMonth===0?"disabled":""}>‹ Earlier</button>
@@ -997,7 +1007,7 @@ function viewSetup(){
       </div>
       <h2 style="margin-top:14px">Income</h2>
       ${state.income.map(it=>itemRow(it,mk,"in")).join("")}
-      <h2 style="margin-top:18px">Cards &amp; loans</h2>
+      <h2 style="margin-top:18px">Cards &amp; Loans</h2>
       ${state.payments.map(p=>itemRow(p,mk,"out")).join("")}
       <div class="btnrow">
         <button class="btn" id="add-in">Add income</button>
@@ -1009,9 +1019,9 @@ function viewSetup(){
     <section>
       <h2>Data</h2>
       <div class="card ${storeMode==="none"?"alert":""}" id="storestat">
-        <h3>${storeMode==="account"?"Saving to your Claude account"
-             :storeMode==="browser"?"Saving on this device"
-             :storeMode==="none"?"Not saving"
+        <h3>${storeMode==="account"?"Saving to Your Claude Account"
+             :storeMode==="browser"?"Saving on This Device"
+             :storeMode==="none"?"Not Saving"
              :"Checking…"}</h3>
         <p>${storeMode==="account"?"Your entries follow you between devices."
             :storeMode==="browser"?"Kept permanently on this phone. Only lost if you clear this site\u2019s browser data — back up now and then."
@@ -1166,11 +1176,30 @@ function wire(){
     save(); render(); toast("Budgets set from "+monthLabel(src));
   };
 
-  on("[data-budget]",el=>el.onchange=()=>{
-    if(!state.budgets) state.budgets={};
-    const c=el.dataset.budget, v=Number(el.value);
-    if(!v||v<=0) delete state.budgets[c]; else state.budgets[c]=v;
-    save(); render();
+  if($("b-cat")){
+    const sel=$("b-cat"), amt=$("b-amt");
+    const load=()=>{ const v=(state.budgets||{})[sel.value]; amt.value=v?v:""; };
+    load();
+    sel.onchange=load;
+    const commit=()=>{
+      if(!state.budgets) state.budgets={};
+      const c=sel.value, v=Number(amt.value);
+      if(!v||v<=0) delete state.budgets[c]; else state.budgets[c]=v;
+      save(); render();
+      const s2=$("b-cat"); if(s2){ s2.value=c; const a2=$("b-amt"); if(a2) a2.value=v>0?v:""; }
+      toast(v>0?c+" budgeted at "+money(v):c+" budget removed");
+    };
+    $("b-set").onclick=commit;
+    amt.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); commit(); } };
+  }
+  on("[data-pickbudget]",el=>el.onclick=()=>{
+    const sel=$("b-cat"); if(!sel) return;
+    sel.value=el.dataset.pickbudget;
+    const a=$("b-amt"); if(a){ a.value=(state.budgets||{})[sel.value]||""; a.focus(); }
+  });
+  on("[data-delbudget]",b=>b.onclick=()=>{
+    delete state.budgets[b.dataset.delbudget];
+    save(); render(); toast("Removed");
   });
   if($("reconcile")) $("reconcile").onclick=openReconcile;
   if($("add-in")) $("add-in").onclick=()=>addItem("in");
@@ -1216,7 +1245,7 @@ function closeSheet(){ document.getElementById("sheet").classList.remove("open")
 function openAdd(){
   sheetCat="Groceries"; pendingFile=null; docMode=true;
   openSheet(`
-    <h2>Log spending</h2>
+    <h2>Log Spending</h2>
     <input class="bigin" id="sp-amt" type="number" step="0.01" inputmode="decimal" placeholder="0" autofocus>
     <div class="chips" id="sp-cats">${CATS.map(c=>`<button class="chip ${c===sheetCat?"on":""}" data-cat="${c}">${c}</button>`).join("")}</div>
     <div id="sp-billwrap" style="display:none">
