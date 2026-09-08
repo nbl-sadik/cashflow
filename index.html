@@ -871,6 +871,10 @@ function usdSigned(n){ return (n<0?"−$":"+$")+nf.format(Math.abs(n)); }
  * is spread evenly over the weeks still to come, so one bad week raises the
  * bar slightly for the rest of the month rather than all landing on the next.
  */
+/** Targets are set on the lower of the month's opening balance and its average
+ *  capital, so a good run mid-month doesn't quietly raise the bar on you. */
+function cfiBasis(M){ return Math.min(Number(M.opening)||0, Number(M.avg)||0); }
+
 function cfiWeeks(mk,M){
   const dim=daysInMonth(mk), off=cfiOffset(mk), today=todayISO();
   const rows=[];
@@ -879,25 +883,38 @@ function cfiWeeks(mk,M){
     (rows[i]=rows[i]||[]).push(d);
   }
   const pct=Number(state.cfi.weeklyTarget)||0;
-  const out=[]; let deficit=0, cumBase=0, cumActual=0;
-  rows.forEach((days,i)=>{
-    const remaining=rows.length-i;
-    const prev=days[0]-2;
-    const startBal = i===0 ? M.opening : ((M.days[prev]&&M.days[prev].bal!==undefined) ? M.days[prev].bal : M.opening);
-    const base=startBal*pct/100;
-    const goal=base+(deficit>0?deficit/remaining:deficit/remaining);
+  const basis=cfiBasis(M);
+  const base=basis*pct/100;
+
+  // first pass: what each week is and what it made
+  const wks=rows.map((days,i)=>{
+    const first=iso(mk,days[0]), last=iso(mk,days[days.length-1]);
     const actual=days.reduce((sum,d)=>sum+((M.days[d-1]&&M.days[d-1].pnl)||0),0);
-    const last=iso(mk,days[days.length-1]);
-    const first=iso(mk,days[0]);
-    const done=last<today, current=first<=today&&last>=today;
-    out.push({n:i+1,days,first,last,startBal,base,goal,actual,done,current,
-              short:Math.max(0,goal-actual),carriedIn:deficit});
-    // only a week that has actually finished can leave a shortfall behind;
-    // weeks still ahead must not compound their own emptiness
-    if(done){ cumBase+=base; cumActual+=actual; deficit=cumBase-cumActual; }
-    else if(current){ cumBase+=base; cumActual+=actual; }
+    return {n:i+1,days,first,last,base,actual,
+            done:last<today, current:first<=today&&last>=today};
   });
-  return out;
+
+  // the gap left by weeks that have actually finished
+  let deficit=0;
+  wks.filter(w=>w.done).forEach(w=>{ deficit += w.base-w.actual; });
+
+  // divided equally across every week still to run, including this one
+  const openWeeks=wks.filter(w=>!w.done).length || 1;
+  const share=deficit/openWeeks;
+
+  let running=0;
+  wks.forEach(w=>{
+    if(w.done){
+      w.goal=w.base+running;            // what it was asked for at the time
+      running += w.base-w.actual;
+    }else{
+      w.goal=w.base+share;
+      w.carriedIn=share;
+    }
+    if(w.carriedIn===undefined) w.carriedIn=0;
+    w.short=Math.max(0,w.goal-w.actual);
+  });
+  return wks;
 }
 
 /** Sunday-first column index for the 1st of the month. */
@@ -931,8 +948,10 @@ function viewCfi(){
   if(cfiMonth>=keys.length) cfiMonth=keys.length-1;
   if(cfiMonth<0) cfiMonth=0;
   const mk=keys[cfiMonth], M=all[mk], target=Number(state.cfi.target)||0;
-  const hit=target>0?Math.min(100,Math.max(0,M.pct/target*100)):0;
-  const need=target>0 ? (M.avg*target/100)-M.profit : 0;
+  const basis=cfiBasis(M);
+  const goalAmt=target>0?basis*target/100:0;
+  const hit=goalAmt>0?Math.min(100,Math.max(0,M.profit/goalAmt*100)):0;
+  const need=goalAmt-M.profit;
   const maxAbs=Math.max(1,...M.days.filter(x=>!x.before).map(x=>Math.abs(x.pnl||0)));
   const today=todayISO();
 
@@ -969,8 +988,9 @@ function viewCfi(){
     <div class="top">
       <h1>${M.profit>=0?"Profit This Month":"Loss This Month"}</h1>
       <div class="figure ${M.profit<0?"neg":"pos"}">${usdSigned(M.profit)}<span class="cur">AED</span></div>
-      <p class="lead">${M.pct>=0?"+":""}${M.pct.toFixed(2)}% on average capital of ${usd(M.avg)}.
-        ${target>0?(need>0?`<strong>${usd(need)}</strong> more to reach ${target}%.`:`Target of ${target}% <strong>reached</strong>.`):""}</p>
+      <p class="lead">${M.pct>=0?"+":""}${M.pct.toFixed(2)}% on average capital of ${usd(Math.round(M.avg))}.
+        ${target>0?(need>0?`<strong>${usd(Math.round(need))}</strong> more to reach ${target}%, measured on ${usd(Math.round(basis))}.`
+                          :`Target of ${target}% <strong>reached</strong>.`):""}</p>
       ${target>0?`<div class="goal"><div class="bar"><span style="width:${hit}%;background:${M.pct<0?"var(--out)":hit>=100?"var(--in)":"var(--warn)"}"></span></div>
         <div class="goalends"><span>0%</span><span>${target}% Target</span></div></div>`:""}
       ${cfiSpark(M)}
@@ -986,9 +1006,9 @@ function viewCfi(){
         const prog=cur.goal>0?Math.min(100,Math.max(0,cur.actual/cur.goal*100)):0;
         const met=cur.actual>=cur.goal;
         return `
-        <p class="sub">${dayLabel(cur.first)} to ${dayLabel(cur.last)} · asking ${wpct}% of the ${usd(Math.round(cur.startBal))} it opened with${
-          cur.carriedIn>0.5?`, plus ${usd(Math.round(cur.carriedIn))} carried from earlier weeks spread across those left`
-          :cur.carriedIn<-0.5?`, less ${usd(Math.round(-cur.carriedIn))} you are already ahead`:""}.</p>
+        <p class="sub">${dayLabel(cur.first)} to ${dayLabel(cur.last)} · ${wpct}% of ${usd(Math.round(cfiBasis(M)))} is ${usd(Math.round(cur.base))}, taken on the lower of this month's opening balance and its average capital${
+          cur.carriedIn>0.5?`. A further ${usd(Math.round(cur.carriedIn))} is this week's share of what earlier weeks fell short by`
+          :cur.carriedIn<-0.5?`, less ${usd(Math.round(-cur.carriedIn))} as you are already ahead`:""}.</p>
         <div class="figure ${cur.actual<0?"neg":"pos"}" style="font-size:30px">${usdSigned(cur.actual)}
           <span class="cur">of ${usd(Math.round(cur.goal))}</span></div>
         <div class="goal"><div class="bar"><span style="width:${prog}%;background:${cur.actual<0?"var(--out)":met?"var(--in)":"var(--warn)"}"></span></div>
@@ -1007,7 +1027,8 @@ function viewCfi(){
     <section>
       <h2>Where It Stands</h2>
       <div class="row"><span class="name"><span class="n">Opening Balance</span><span class="d">start of ${monthLabel(mk)}</span></span><span class="v num">${usd(M.opening)}</span></div>
-      <div class="row"><span class="name"><span class="n">Average Capital</span><span class="d">what the % is measured against</span></span><span class="v num">${usd(M.avg)}</span></div>
+      <div class="row"><span class="name"><span class="n">Average Capital</span><span class="d">what the % is measured against</span></span><span class="v num">${usd(Math.round(M.avg))}</span></div>
+      <div class="row"><span class="name"><span class="n">Target Basis</span><span class="d">lower of opening and average</span></span><span class="v num">${usd(Math.round(cfiBasis(M)))}</span></div>
       <div class="row"><span class="name"><span class="n">Deposits In</span></span><span class="v in num">${M.dep?usdSigned(M.dep):"—"}</span></div>
       <div class="row"><span class="name"><span class="n">Withdrawals Out</span></span><span class="v out num">${M.wd?usdSigned(-M.wd):"—"}</span></div>
       <div class="row"><span class="name"><span class="n">Balance Now</span><span class="d">after profit and flows</span></span><span class="v num">${usd(M.closing)}</span></div>
