@@ -203,6 +203,16 @@
   .cal .c.up .a{color:var(--in)}
   .cal .c.down .a{color:var(--out)}
 
+  .wks{display:flex;gap:6px;margin-top:14px}
+  .wks .wk{flex:1;min-width:0;border:1px solid var(--rule);border-radius:8px;padding:7px 4px;
+           text-align:center;background:var(--surface);opacity:1}
+  .wks .wk .wl{display:block;font-size:10.5px;color:var(--muted)}
+  .wks .wk .wv{display:block;font-size:11.5px;font-weight:620;margin-top:2px;
+               overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wks .wk.hit{border-color:var(--in)} .wks .wk.hit .wv{color:var(--in)}
+  .wks .wk.miss{border-color:var(--out)} .wks .wk.miss .wv{color:var(--out)}
+  .wks .wk.cur{border-width:2px;border-color:var(--ink)}
+  .wks .wk.open .wv{color:var(--muted)}
   .mrow{display:flex;align-items:center;gap:9px;width:100%;padding:9px 0;border:none;
         border-bottom:1px solid var(--rule-soft);background:none;font:inherit;color:var(--ink);
         cursor:pointer;text-align:left}
@@ -807,6 +817,8 @@ function cfiInit(){
   if(!state.cfi.pnl) state.cfi.pnl={};
   if(!state.cfi.flows) state.cfi.flows=[];
   if(state.cfi.target===undefined) state.cfi.target=10;
+  if(state.cfi.weeklyTarget===undefined) state.cfi.weeklyTarget=2.5;
+  if(state.cfi.rate===undefined) state.cfi.rate=3.67;
 }
 
 function cfiRange(){
@@ -850,6 +862,44 @@ function cfiBuild(){
   return out;
 }
 
+function usd(n){ return (n<0?"−$":"$")+nf.format(Math.abs(n)); }
+function usdSigned(n){ return (n<0?"−$":"+$")+nf.format(Math.abs(n)); }
+
+/**
+ * Weeks run Sunday to Saturday, matching the calendar rows.
+ * Each week is asked for 2.5% of the capital it started with. Any shortfall
+ * is spread evenly over the weeks still to come, so one bad week raises the
+ * bar slightly for the rest of the month rather than all landing on the next.
+ */
+function cfiWeeks(mk,M){
+  const dim=daysInMonth(mk), off=cfiOffset(mk), today=todayISO();
+  const rows=[];
+  for(let d=1;d<=dim;d++){
+    const i=Math.floor((off+d-1)/7);
+    (rows[i]=rows[i]||[]).push(d);
+  }
+  const pct=Number(state.cfi.weeklyTarget)||0;
+  const out=[]; let deficit=0, cumBase=0, cumActual=0;
+  rows.forEach((days,i)=>{
+    const remaining=rows.length-i;
+    const prev=days[0]-2;
+    const startBal = i===0 ? M.opening : ((M.days[prev]&&M.days[prev].bal!==undefined) ? M.days[prev].bal : M.opening);
+    const base=startBal*pct/100;
+    const goal=base+(deficit>0?deficit/remaining:deficit/remaining);
+    const actual=days.reduce((sum,d)=>sum+((M.days[d-1]&&M.days[d-1].pnl)||0),0);
+    const last=iso(mk,days[days.length-1]);
+    const first=iso(mk,days[0]);
+    const done=last<today, current=first<=today&&last>=today;
+    out.push({n:i+1,days,first,last,startBal,base,goal,actual,done,current,
+              short:Math.max(0,goal-actual),carriedIn:deficit});
+    // only a week that has actually finished can leave a shortfall behind;
+    // weeks still ahead must not compound their own emptiness
+    if(done){ cumBase+=base; cumActual+=actual; deficit=cumBase-cumActual; }
+    else if(current){ cumBase+=base; cumActual+=actual; }
+  });
+  return out;
+}
+
 /** Sunday-first column index for the 1st of the month. */
 function cfiOffset(mk){
   const [y,m]=mk.split("-").map(Number);
@@ -858,8 +908,8 @@ function cfiOffset(mk){
 /** Short enough to fit a cell: 12,694 becomes 12.7k */
 function cellAmt(v){
   const a=Math.abs(v);
-  if(a>=10000) return (v<0?"−":"")+nf.format(Math.round(a/100)/10)+"k";
-  return money(Math.round(v));
+  if(a>=10000) return (v<0?"−$":"$")+nf.format(Math.round(a/100)/10)+"k";
+  return usd(Math.round(v));
 }
 
 function cfiSpark(M){
@@ -903,7 +953,7 @@ function viewCfi(){
       cells.push(`<div class="${cls}" aria-label="${dayLabel(x.date)}${wknd?", weekend":""}">${inner}</div>`);
     else
       cells.push(`<button class="${cls}" data-cfiday="${x.date}"
-        aria-label="${dayLabel(x.date)} ${p?money(p):"no entry"}">${inner}</button>`);
+        aria-label="${dayLabel(x.date)} ${p?usd(p):"no entry"}">${inner}</button>`);
   });
 
   let tail=1;
@@ -918,13 +968,35 @@ function viewCfi(){
 
     <div class="top">
       <h1>${M.profit>=0?"Profit This Month":"Loss This Month"}</h1>
-      <div class="figure ${M.profit<0?"neg":"pos"}">${signed(M.profit)}<span class="cur">AED</span></div>
-      <p class="lead">${M.pct>=0?"+":""}${M.pct.toFixed(2)}% on average capital of ${money(M.avg)}.
-        ${target>0?(need>0?`<strong>${money(need)}</strong> more to reach ${target}%.`:`Target of ${target}% <strong>reached</strong>.`):""}</p>
+      <div class="figure ${M.profit<0?"neg":"pos"}">${usdSigned(M.profit)}<span class="cur">AED</span></div>
+      <p class="lead">${M.pct>=0?"+":""}${M.pct.toFixed(2)}% on average capital of ${usd(M.avg)}.
+        ${target>0?(need>0?`<strong>${usd(need)}</strong> more to reach ${target}%.`:`Target of ${target}% <strong>reached</strong>.`):""}</p>
       ${target>0?`<div class="goal"><div class="bar"><span style="width:${hit}%;background:${M.pct<0?"var(--out)":hit>=100?"var(--in)":"var(--warn)"}"></span></div>
-        <div class="goalends"><span>0%</span><span>${target}% target</span></div></div>`:""}
+        <div class="goalends"><span>0%</span><span>${target}% Target</span></div></div>`:""}
       ${cfiSpark(M)}
     </div>
+
+    <section>
+      <h2>This Week</h2>
+      ${(() => {
+        const wks=cfiWeeks(mk,M);
+        const cur=wks.find(w=>w.current)||wks.filter(w=>w.done).pop()||wks[0];
+        if(!cur) return "";
+        const wpct=Number(state.cfi.weeklyTarget)||0;
+        const prog=cur.goal>0?Math.min(100,Math.max(0,cur.actual/cur.goal*100)):0;
+        const met=cur.actual>=cur.goal;
+        return `
+        <p class="sub">${dayLabel(cur.first)} to ${dayLabel(cur.last)} · asking ${wpct}% of the ${usd(Math.round(cur.startBal))} it opened with${
+          cur.carriedIn>0.5?`, plus ${usd(Math.round(cur.carriedIn))} carried from earlier weeks spread across those left`
+          :cur.carriedIn<-0.5?`, less ${usd(Math.round(-cur.carriedIn))} you are already ahead`:""}.</p>
+        <div class="figure ${cur.actual<0?"neg":"pos"}" style="font-size:30px">${usdSigned(cur.actual)}
+          <span class="cur">of ${usd(Math.round(cur.goal))}</span></div>
+        <div class="goal"><div class="bar"><span style="width:${prog}%;background:${cur.actual<0?"var(--out)":met?"var(--in)":"var(--warn)"}"></span></div>
+          <div class="goalends"><span>${met?"Target Met":usd(Math.round(cur.goal-cur.actual))+" To Go"}</span><span>${wpct}% Weekly</span></div></div>
+        <div class="wks">${wks.map(w=>`<span class="wk ${w.current?"cur":""} ${w.done?(w.actual>=w.goal?"hit":"miss"):"open"}">
+          <span class="wl">W${w.n}</span><span class="wv">${w.actual?usdSigned(Math.round(w.actual)):"—"}</span></span>`).join("")}</div>`;
+      })()}
+    </section>
 
     <section>
       <h2>The Month, Day by Day</h2>
@@ -934,14 +1006,14 @@ function viewCfi(){
 
     <section>
       <h2>Where It Stands</h2>
-      <div class="row"><span class="name"><span class="n">Opening balance</span><span class="d">start of ${monthLabel(mk)}</span></span><span class="v num">${money(M.opening)}</span></div>
-      <div class="row"><span class="name"><span class="n">Average capital</span><span class="d">what the % is measured against</span></span><span class="v num">${money(M.avg)}</span></div>
-      <div class="row"><span class="name"><span class="n">Deposits in</span></span><span class="v in num">${M.dep?signed(M.dep):"—"}</span></div>
-      <div class="row"><span class="name"><span class="n">Withdrawals out</span></span><span class="v out num">${M.wd?signed(-M.wd):"—"}</span></div>
-      <div class="row"><span class="name"><span class="n">Balance now</span><span class="d">after profit and flows</span></span><span class="v num">${money(M.closing)}</span></div>
-      ${(M.wins+M.losses)?`<div class="row"><span class="name"><span class="n">Days traded</span><span class="d">${M.wins} up · ${M.losses} down</span></span><span class="v num">${M.wins+M.losses}</span></div>`:""}
-      ${M.best?`<div class="row"><span class="name"><span class="n">Best day</span><span class="d">${M.best.d} ${monthLabel(mk).split(" ")[0]}</span></span><span class="v in num">${signed(M.best.p)}</span></div>`:""}
-      ${M.worst&&M.worst.p<0?`<div class="row"><span class="name"><span class="n">Worst day</span><span class="d">${M.worst.d} ${monthLabel(mk).split(" ")[0]}</span></span><span class="v out num">${signed(M.worst.p)}</span></div>`:""}
+      <div class="row"><span class="name"><span class="n">Opening Balance</span><span class="d">start of ${monthLabel(mk)}</span></span><span class="v num">${usd(M.opening)}</span></div>
+      <div class="row"><span class="name"><span class="n">Average Capital</span><span class="d">what the % is measured against</span></span><span class="v num">${usd(M.avg)}</span></div>
+      <div class="row"><span class="name"><span class="n">Deposits In</span></span><span class="v in num">${M.dep?usdSigned(M.dep):"—"}</span></div>
+      <div class="row"><span class="name"><span class="n">Withdrawals Out</span></span><span class="v out num">${M.wd?usdSigned(-M.wd):"—"}</span></div>
+      <div class="row"><span class="name"><span class="n">Balance Now</span><span class="d">after profit and flows</span></span><span class="v num">${usd(M.closing)}</span></div>
+      ${(M.wins+M.losses)?`<div class="row"><span class="name"><span class="n">Days Traded</span><span class="d">${M.wins} up · ${M.losses} down</span></span><span class="v num">${M.wins+M.losses}</span></div>`:""}
+      ${M.best?`<div class="row"><span class="name"><span class="n">Best Day</span><span class="d">${M.best.d} ${monthLabel(mk).split(" ")[0]}</span></span><span class="v in num">${usdSigned(M.best.p)}</span></div>`:""}
+      ${M.worst&&M.worst.p<0?`<div class="row"><span class="name"><span class="n">Worst Day</span><span class="d">${M.worst.d} ${monthLabel(mk).split(" ")[0]}</span></span><span class="v out num">${usdSigned(M.worst.p)}</span></div>`:""}
     </section>
 
     <section>
@@ -951,12 +1023,12 @@ function viewCfi(){
         if(!fl.length) return `<div class="empty">Nothing moved in or out this month.</div>`;
         return fl.map(f=>`<div class="row">
           <span class="name"><span class="n">${f.kind==="deposit"?"Deposit":"Withdrawal"}</span>
-            <span class="d">${dayLabel(f.date)}${f.note?" · "+esc(f.note):""}</span></span>
-          <span class="v ${f.kind==="deposit"?"in":"out"}">${signed(f.kind==="deposit"?Math.abs(f.amount):-Math.abs(f.amount))}</span>
+            <span class="d">${dayLabel(f.date)}${f.kind==="withdrawal"?" · "+money(Math.round(f.amount*(Number(state.cfi.rate)||0)))+" AED in":""}${f.note?" · "+esc(f.note):""}</span></span>
+          <span class="v ${f.kind==="deposit"?"in":"out"}">${usdSigned(f.kind==="deposit"?Math.abs(f.amount):-Math.abs(f.amount))}</span>
           <button class="del" data-cfidelflow="${f.id}" aria-label="Remove">×</button>
         </div>`).join("");
       })()}
-      <button class="btn wide" id="cfi-addflow">Record a deposit or withdrawal</button>
+      <button class="btn wide" id="cfi-addflow">Record A Deposit Or Withdrawal</button>
     </section>
 
     <section>
@@ -968,7 +1040,7 @@ function viewCfi(){
           <span class="ml">${monthLabel(k)}</span>
           <span class="mbar"><span style="width:${w}%;background:${m.pct<0?"var(--out)":m.pct>=target?"var(--in)":"var(--warn)"}"></span></span>
           <span class="mv ${m.pct<0?"neg":"pos"}">${m.pct>=0?"+":""}${m.pct.toFixed(1)}%</span>
-          <span class="ma">${signed(m.profit)}</span>
+          <span class="ma">${usdSigned(m.profit)}</span>
         </button>`;
       }).join("")}
     </section>`;
@@ -1012,7 +1084,7 @@ function openCfiDay(date){
       if(!v){ delete state.cfi.pnl[date]; }
       else state.cfi.pnl[date] = cfiSign==="loss" ? -v : v;
       save(); closeSheet(); render();
-      toast(v?(cfiSign==="loss"?"Loss of ":"Profit of ")+money(v)+" on "+dayLabel(date):"Day cleared");
+      toast(v?(cfiSign==="loss"?"Loss of ":"Profit of ")+usd(v)+" on "+dayLabel(date):"Day cleared");
     };
     if(p.querySelector("#cf-del")) p.querySelector("#cf-del").onclick=()=>{
       delete state.cfi.pnl[date]; save(); closeSheet(); render(); toast("Removed");
@@ -1028,7 +1100,7 @@ function openCfiFlow(){
   let kind="deposit";
   const draw=()=>{
     openSheet(`
-      <h2>Money In or Out</h2>
+      <h2>Money In Or Out</h2>
       <div class="seg" style="margin-bottom:14px">
         <button data-fk="deposit" class="${kind==="deposit"?"on":""}">Deposit</button>
         <button data-fk="withdrawal" class="${kind==="withdrawal"?"on":""}">Withdrawal</button>
@@ -1050,10 +1122,22 @@ function openCfiFlow(){
     p.querySelector("#fl-save").onclick=()=>{
       const v=Math.abs(Number(p.querySelector("#fl-amt").value)||0);
       if(!v){ toast("Enter an amount"); return; }
-      state.cfi.flows.push({ id:"cf"+Date.now(), date:p.querySelector("#fl-date").value,
-                             amount:v, kind, note:p.querySelector("#fl-note").value.trim() });
+      const fid="cf"+Date.now(), fdate=p.querySelector("#fl-date").value;
+      state.cfi.flows.push({ id:fid, date:fdate, amount:v, kind,
+                             note:p.querySelector("#fl-note").value.trim() });
+      let aed=0;
+      if(kind==="withdrawal"){
+        const rate=Number(state.cfi.rate)||0;
+        aed=Math.round(v*rate*100)/100;
+        const cfiItem=state.income.find(x=>/^CFI/i.test(x.name)) || state.income.find(x=>x.id==="i4");
+        state.tx.push({ id:"t"+Date.now(), date:fdate, amount:aed,
+                        desc:"CFI withdrawal, $"+nf.format(v)+" at "+rate,
+                        cat:null, cfiFlow:fid,
+                        link: cfiItem?{itemId:cfiItem.id,month:monthOf(fdate)}:null });
+      }
       save(); closeSheet(); render();
-      toast((kind==="deposit"?"Deposited ":"Withdrew ")+money(v));
+      toast(kind==="deposit" ? "Deposited "+usd(v)
+            : "Withdrew "+usd(v)+" · "+money(aed)+" AED added to your balance");
     };
     bindClose();
     setTimeout(()=>{ const a=document.getElementById("fl-amt"); if(a) a.focus(); },60);
@@ -1286,12 +1370,17 @@ function viewSetup(){
     <section>
       <h2>CFI Account</h2>
       <p class="sub">The broker balance when you started tracking, and the return you're aiming for each month.</p>
-      <div class="field"><label for="cfi-open">Starting balance</label>
+      <div class="field"><label for="cfi-open">Starting Balance ($)</label>
         <input id="cfi-open" type="number" step="0.01" inputmode="decimal" value="${(state.cfi&&state.cfi.opening)||0}"></div>
-      <div class="field"><label for="cfi-date">Tracking from</label>
+      <div class="field"><label for="cfi-date">Tracking From</label>
         <input id="cfi-date" type="date" value="${(state.cfi&&state.cfi.openingDate)||todayISO()}"></div>
-      <div class="field"><label for="cfi-target">Monthly target %</label>
+      <div class="field"><label for="cfi-target">Monthly Target %</label>
         <input id="cfi-target" type="number" step="0.1" inputmode="decimal" value="${(state.cfi&&state.cfi.target)||0}"></div>
+      <div class="field"><label for="cfi-week">Weekly Target %</label>
+        <input id="cfi-week" type="number" step="0.1" inputmode="decimal" value="${(state.cfi&&state.cfi.weeklyTarget)||0}"></div>
+      <div class="field"><label for="cfi-rate">USD To AED Rate</label>
+        <input id="cfi-rate" type="number" step="0.0001" inputmode="decimal" value="${(state.cfi&&state.cfi.rate)||0}"></div>
+      <p class="hint">Withdrawals are logged in dollars here and added to your cash flow in dirhams at this rate, against your CFI Income line.</p>
       <p class="hint">The percentage is measured against your average capital for the month, so deposits and withdrawals part-way through are weighted by the days they were actually in the account.</p>
     </section>
 
@@ -1457,7 +1546,12 @@ function wire(){
   on("[data-cfiday]",b=>b.onclick=()=>openCfiDay(b.dataset.cfiday));
   on("[data-cfijump]",b=>b.onclick=()=>{ cfiMonth=Number(b.dataset.cfijump); render(); window.scrollTo(0,0); });
   on("[data-cfidelflow]",b=>b.onclick=()=>{
-    state.cfi.flows=state.cfi.flows.filter(f=>f.id!==b.dataset.cfidelflow);
+    const fid=b.dataset.cfidelflow;
+    const linked=state.tx.filter(t=>t.cfiFlow===fid);
+    if(linked.length && !confirm("This also removes the "+money(linked.reduce((s2,t)=>s2+t.amount,0))
+       +" AED entry it created in your cash flow. Remove both?")) return;
+    state.cfi.flows=state.cfi.flows.filter(f=>f.id!==fid);
+    state.tx=state.tx.filter(t=>t.cfiFlow!==fid);
     save(); render(); toast("Removed");
   });
   if($("cfi-prev")) $("cfi-prev").onclick=()=>{ cfiMonth=Math.max(0,cfiMonth-1); render(); window.scrollTo(0,0); };
@@ -1529,6 +1623,8 @@ function wire(){
 
   if($("cfi-open")) $("cfi-open").onchange=e=>{ cfiInit(); state.cfi.opening=Number(e.target.value)||0; save(); render(); };
   if($("cfi-date")) $("cfi-date").onchange=e=>{ cfiInit(); state.cfi.openingDate=e.target.value; save(); render(); };
+  if($("cfi-week")) $("cfi-week").onchange=e=>{ cfiInit(); state.cfi.weeklyTarget=Math.max(0,Number(e.target.value)||0); save(); render(); };
+  if($("cfi-rate")) $("cfi-rate").onchange=e=>{ cfiInit(); state.cfi.rate=Math.max(0,Number(e.target.value)||0); save(); render(); };
   if($("cfi-target")) $("cfi-target").onchange=e=>{ cfiInit(); state.cfi.target=Math.max(0,Number(e.target.value)||0); save(); render(); };
   if($("a-bal")) $("a-bal").onchange=e=>{ state.anchor.balance=Number(e.target.value)||0; save(); render(); };
   if($("a-date")) $("a-date").onchange=e=>{ state.anchor.date=e.target.value; save(); render(); };
