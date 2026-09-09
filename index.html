@@ -83,7 +83,10 @@
   .neg{color:var(--out)} .pos{color:var(--in)}
   .banks{display:flex;gap:9px;margin-top:14px}
   .bank{flex:1;min-width:0;border:1px solid var(--rule);border-left-width:3px;
-        border-radius:var(--radius);background:var(--surface);padding:9px 11px}
+        border-radius:var(--radius);background:var(--surface);padding:9px 11px;
+        font:inherit;text-align:left;cursor:pointer;-webkit-user-select:none;user-select:none;
+        -webkit-tap-highlight-color:transparent}
+  .bank:active{transform:scale(.985)}
   .bank .bn{display:block;font-size:11.5px;letter-spacing:.04em;font-weight:620}
   .bank .bv{display:block;font-size:18px;font-weight:600;margin-top:3px;
             font-variant-numeric:tabular-nums;letter-spacing:-.01em;
@@ -1237,7 +1240,7 @@ function openCfiFlow(){
 /* ==========================================================
    RENDER
    ========================================================== */
-let state=null, tab="today", lastTab="today", curMonth=0, cfiMonth=0, cfiSign="profit", months=null, reconAcct=null, confAcct=null;
+let state=null, tab="today", lastTab="today", curMonth=0, cfiMonth=0, cfiSign="profit", months=null, reconAcct=null, confAcct=null, tapAcct=null, tapTime=0;
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
 function applyTheme(){
@@ -1295,9 +1298,11 @@ function viewToday(){
       <h1>Spend Less Nabil !!</h1>
       <div class="when">${dayLabel(t)} · updates as you log</div>
       <div class="figure ${bal<0?"neg":""}"><span class="lbl">Balance</span>${money(bal)}<span class="cur">AED</span></div>
-      <div class="banks">${accts().map(a=>`<div class="bank ${a.id}">
+      <div class="banks">${accts().map(a=>`<button class="bank ${a.id}" data-banktap="${a.id}"
+        aria-label="${esc(a.label)}, ${money(acctBalance(a.id))}. Double tap to move money in.">
         <span class="bn">${esc(a.name)}</span>
-        <span class="bv">${money(acctBalance(a.id))}</span></div>`).join("")}</div>
+        <span class="bv">${money(acctBalance(a.id))}</span></button>`).join("")}</div>
+      ${accts().length>1?`<p class="hint" style="margin-top:8px">Double-tap a bank to move money into it from the other.</p>`:""}
       <p class="lead">${
         o.at
           ? (o.low<0 && o.dip
@@ -1692,6 +1697,14 @@ function wire(){
   const on=(sel,fn)=>document.querySelectorAll(sel).forEach(fn);
 
   on("[data-tab]",b=>b.onclick=()=>{ tab=b.dataset.tab; render(); window.scrollTo(0,0); });
+  on("[data-banktap]",b=>{
+    b.onclick=()=>{
+      const id=b.dataset.banktap, now=Date.now();
+      if(tapAcct===id && now-tapTime<420){ tapAcct=null; openTransferTo(id); }
+      else { tapAcct=id; tapTime=now; }
+    };
+    b.ondblclick=()=>{ tapAcct=null; openTransferTo(b.dataset.banktap); };
+  });
   on("[data-cfiday]",b=>b.onclick=()=>openCfiDay(b.dataset.cfiday));
   on("[data-cfijump]",b=>b.onclick=()=>{ cfiMonth=Number(b.dataset.cfijump); render(); window.scrollTo(0,0); });
   on("[data-cfidelflow]",b=>b.onclick=()=>{
@@ -1856,7 +1869,8 @@ function wire(){
 }
 
 /* ---------- add-spending sheet ---------- */
-let sheetCat="Groceries", pendingFile=null, docMode=true, sheetMode="out", sheetIncomeId="";
+let sheetCat="Groceries", pendingFile=null, docMode=true, sheetMode="out", sheetIncomeId="",
+    sheetAcct=DEF_ACCT, xferFrom="eib", xferTo="cbd";
 function openSheet(html){
   document.getElementById("panel").innerHTML=html;
   document.getElementById("sheet").classList.add("open");
@@ -1865,7 +1879,8 @@ function closeSheet(){ document.getElementById("sheet").classList.remove("open")
 
 function openAdd(){
   sheetCat="Groceries"; pendingFile=null; docMode=true;
-  sheetMode="out"; sheetIncomeId="";
+  sheetMode="out"; sheetIncomeId=""; sheetAcct=DEF_ACCT;
+  xferFrom=(accts()[0]||{}).id||"eib"; xferTo=(accts()[1]||{}).id||"cbd";
   drawAddSheet();
 }
 
@@ -1878,7 +1893,7 @@ function drawAddSheet(){
       <button data-mode="in" class="${isIn?"on":""}">Money in</button>
     </div>
     <input class="bigin" id="sp-amt" type="number" step="0.01" inputmode="decimal" placeholder="0" autofocus>
-    ${isIn ? incomePicker() : `
+    ${isIn ? incomePicker()+accountPicker() : `
       <div class="chips" id="sp-cats">${CATS.map(c=>`<button class="chip ${c===sheetCat?"on":""}" data-cat="${c}">${c}</button>`).join("")}</div>
       <div id="sp-billwrap" style="display:none">
         <input type="file" id="sp-cam" accept="image/*" capture="environment" style="display:none">
@@ -1892,13 +1907,22 @@ function drawAddSheet(){
         </div>
         <div id="sp-preview"></div>
         <p class="hint" id="sp-fname">Straight from the camera, or a photo or PDF you already have.</p>
-      </div>`}
+      </div>
+      ${accountPicker()}`}
     <input class="text" id="sp-desc" type="text" placeholder="Note (optional)">
     <div class="field"><label for="sp-date">Date</label><input id="sp-date" type="date" value="${todayISO()}"></div>
     <button class="btn solid wide" id="sp-save">Save</button>
     <button class="btn wide" data-close>Cancel</button>
   `);
   wireAddSheet();
+}
+
+/** Which bank the entry hits. */
+function accountPicker(){
+  return `<p class="sub" style="margin:14px 0 0">Account</p>
+    <div class="chips" id="sp-acct" style="margin-top:6px">
+      ${accts().map(a=>`<button class="chip ac ${a.id} ${a.id===sheetAcct?"on":""}" data-acct="${a.id}">${esc(a.name)} · ${money(acctBalance(a.id))}</button>`).join("")}
+    </div>`;
 }
 
 /** Which planned income this belongs to, and what is still outstanding on it. */
@@ -1931,6 +1955,10 @@ function wireAddSheet(){
   const amtEl=p.querySelector("#sp-amt");
   const keep=()=>amtEl.value;
 
+  p.querySelectorAll("[data-acct]").forEach(b=>b.onclick=()=>{
+    sheetAcct=b.dataset.acct;
+    p.querySelectorAll("[data-acct]").forEach(x=>x.classList.toggle("on",x.dataset.acct===sheetAcct));
+  });
   p.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{
     const v=keep(); sheetMode=b.dataset.mode; drawAddSheet();
     const a=document.getElementById("sp-amt"); if(a) a.value=v;
@@ -2003,7 +2031,7 @@ function wireAddSheet(){
     const tx={ id:"t"+Date.now(), date,
                amount: isIn ? Math.abs(v) : -Math.abs(v),
                desc: note || (isIn ? (item?item.name:"Income") : sheetCat),
-               cat: isIn ? null : sheetCat,
+               cat: isIn ? null : sheetCat, acct: sheetAcct,
                link: item ? {itemId:item.id, month:monthOf(date)} : null };
     if(!isIn && pendingFile && sheetCat==="Bills"){
       try{ tx.att=await storeAttachment(pendingFile,docMode); }
@@ -2129,6 +2157,56 @@ function downloadFile(name,text,mime){
     document.body.appendChild(a); a.click();
     setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },1500);
   }catch(e){ toast("Couldn't create the file here"); }
+}
+
+/** Double-tapping a bank pulls money into it from the other one. */
+function openTransferTo(toId){
+  const to=acctOf(toId), from=accts().find(a=>a.id!==toId);
+  if(!from){ toast("You only have one account"); return; }
+  const avail=acctBalance(from.id);
+  openSheet(`
+    <h2>Add Funds To ${esc(to.name)}</h2>
+    <p class="sub">Moving from <span class="atag ${from.id}">${esc(from.name)}</span>, which holds ${money(avail)}.
+      ${esc(to.name)} is at ${money(acctBalance(to.id))}.</p>
+    <input class="bigin" id="mv-amt" type="number" step="0.01" inputmode="decimal" placeholder="0">
+    <div class="chips">
+      <button class="chip" data-mvbump="500">+500</button>
+      <button class="chip" data-mvbump="1000">+1,000</button>
+      <button class="chip" data-mvbump="5000">+5,000</button>
+      ${avail>0?`<button class="chip" data-mvset="${avail}">All, ${money(avail)}</button>`:""}
+      <button class="chip" data-mvbump="0">Clear</button>
+    </div>
+    <div id="mv-note" class="hint">Your total doesn't change — only which bank the money sits in.</div>
+    <div class="field"><label for="mv-date">Date</label><input id="mv-date" type="date" value="${todayISO()}"></div>
+    <button class="btn solid wide" id="mv-save">Move The Money</button>
+    <button class="btn wide" data-close>Cancel</button>
+  `);
+  const p=document.getElementById("panel");
+  const amt=p.querySelector("#mv-amt"), note=p.querySelector("#mv-note");
+  const update=()=>{
+    const v=Number(amt.value)||0;
+    note.innerHTML = v<=0 ? "Your total doesn't change — only which bank the money sits in."
+      : `${esc(from.name)} would go to <strong>${money(avail-v)}</strong> and ${esc(to.name)} to <strong>${money(acctBalance(to.id)+v)}</strong>.`
+        + (v>avail?` <span style="color:var(--out)">That is more than ${esc(from.name)} holds.</span>`:"");
+  };
+  amt.oninput=update;
+  p.querySelectorAll("[data-mvbump]").forEach(b=>b.onclick=()=>{
+    const inc=Number(b.dataset.mvbump);
+    amt.value = inc===0 ? "" : String((Number(amt.value)||0)+inc);
+    update();
+  });
+  p.querySelectorAll("[data-mvset]").forEach(b=>b.onclick=()=>{ amt.value=String(Number(b.dataset.mvset)); update(); });
+  p.querySelector("#mv-save").onclick=()=>{
+    const v=Math.abs(Number(amt.value)||0);
+    if(!v){ toast("Enter an amount"); return; }
+    state.tx.push({ id:"t"+Date.now(), date:p.querySelector("#mv-date").value,
+                    amount:v, desc:from.name+" → "+to.name, xfer:{from:from.id,to:to.id} });
+    save(); closeSheet(); render();
+    toast(money(v)+" moved · "+from.name+" "+money(acctBalance(from.id))
+          +" · "+to.name+" "+money(acctBalance(to.id)));
+  };
+  bindClose();
+  setTimeout(()=>{ const a=document.getElementById("mv-amt"); if(a) a.focus(); },60);
 }
 
 function openReconcile(){
