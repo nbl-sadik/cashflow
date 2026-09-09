@@ -180,11 +180,25 @@
   .seg button.on{background:var(--ink);color:var(--onink)}
   .seg.inrow{flex:none;width:142px}
   .seg.inrow button{padding:6px 4px;font-size:12.5px}
+  .sec-cfi{border:1.5px solid var(--out);border-radius:12px;padding:2px 14px 16px;margin-top:18px;
+           border-bottom-width:1.5px}
+  .grp{border-bottom:1px solid var(--rule-soft)}
+  .grp>summary{padding:12px 0;font-size:14.5px;font-weight:560}
+  .grp .cnt{color:var(--muted);font-weight:400;font-size:12.5px;margin-left:5px}
+  .grpbody{padding-bottom:8px}
+  .adv{border-top:1px solid var(--rule);margin-top:10px}
+  .adv>summary{padding:20px 0;font-size:14.5px;font-weight:620}
+  .advbody section:first-child{padding-top:0}
   .hint{font-size:12.5px;color:var(--muted);margin-top:10px}
-  details>summary{cursor:pointer;font-size:13.5px;font-weight:620;padding:15px 0;list-style:none;display:flex;justify-content:space-between;align-items:center}
+  details>summary{cursor:pointer;font-size:13.5px;font-weight:620;padding:15px 0;list-style:none;display:flex;align-items:center;gap:9px}
   details>summary::-webkit-details-marker{display:none}
-  details>summary:after{content:"+";font-weight:400;font-size:17px;color:var(--muted)}
-  details[open]>summary:after{content:"–"}
+  details>summary::marker{content:""}
+  /* the box sits on the left, the way Excel groups rows */
+  details>summary:before{content:"+";flex:none;display:inline-flex;align-items:center;justify-content:center;
+    width:17px;height:17px;box-sizing:border-box;border:1px solid var(--rule);border-radius:3px;
+    background:var(--surface);font-size:13px;font-weight:600;line-height:1;color:var(--ink)}
+  details[open]>summary:before{content:"−"}
+  details>summary:active:before{background:var(--bg)}
 
   /* ---- CFI tracker ---- */
   .goal{margin-top:14px}
@@ -1243,6 +1257,7 @@ function openCfiFlow(){
 const TAB_ICON={today:"◉",log:"≡",months:"▤",cfi:"◫"};
 const TAB_NAME={today:"Today",log:"Log",months:"Months",cfi:"CFI"};
 const BAR_NAME={today:"Today",log:"Log",months:"Months",cfi:"CFI Profit Tracker"};
+let sgOpen={income:false,pay:false}, advOpen=false;
 let state=null, tab="today", lastTab="today", curMonth=0, cfiMonth=0, cfiSign="profit", months=null, reconAcct=null, confAcct=null, tapAcct=null, tapTime=0;
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
@@ -1458,17 +1473,7 @@ function viewSetup(){
   return `
     <div class="top" style="padding-bottom:0"><div class="when">Self-hosted build \u00b7 v3</div></div>
 
-    <section>
-      <h2>Appearance</h2>
-      <p class="sub">Auto follows your phone. Pick Light or Dark to override it.</p>
-      <div class="seg">
-        <button data-theme-set="auto" class="${(state.theme||"auto")==="auto"?"on":""}">Auto</button>
-        <button data-theme-set="light" class="${state.theme==="light"?"on":""}">Light</button>
-        <button data-theme-set="dark" class="${state.theme==="dark"?"on":""}">Dark</button>
-      </div>
-    </section>
-
-    <section>
+    <section class="sec-cfi">
       <h2>CFI Account</h2>
       <p class="sub">The broker balance when you started tracking, and the return you're aiming for each month.</p>
       <div class="field"><label for="cfi-open">Starting Balance ($)</label>
@@ -1483,16 +1488,6 @@ function viewSetup(){
         <input id="cfi-rate" type="number" step="0.0001" inputmode="decimal" value="${(state.cfi&&state.cfi.rate)||0}"></div>
       <p class="hint">Withdrawals are logged in dollars here and added to your cash flow in dirhams at this rate, against your CFI Income line.</p>
       <p class="hint">The percentage is measured against your average capital for the month, so deposits and withdrawals part-way through are weighted by the days they were actually in the account.</p>
-    </section>
-
-    <section>
-      <h2>Starting Point</h2>
-      <p class="sub">The one balance you enter by hand. Everything after this date comes from your log.</p>
-      ${accts().map(a=>`<div class="field">
-        <label for="ab-${a.id}"><span class="atag ${a.id}">${esc(a.name)}</span> ${esc(a.label)}</label>
-        <input id="ab-${a.id}" type="number" step="0.01" inputmode="decimal" value="${a.opening}" data-acctopen="${a.id}"></div>`).join("")}
-      <div class="field"><label for="a-date">On</label><input id="a-date" type="date" value="${state.anchor.date}"></div>
-      <p class="hint">Changing these rewrites every balance in the app. Use Reconcile on the Today tab for routine corrections instead.</p>
     </section>
 
     <section>
@@ -1524,6 +1519,49 @@ function viewSetup(){
     </section>
 
     <section>
+      <h2>Scheduled Items · ${monthLabel(mk)}</h2>
+      <p class="sub">Tap a name to rename it or change its due day. Amounts are per month — move between months with the arrows below.</p>
+      <div class="btnrow" style="margin:0 0 10px">
+        <button class="btn mini" id="prev2" ${curMonth===0?"disabled":""}>‹ Earlier</button>
+        <button class="btn mini" id="next2" ${curMonth===keys.length-1?"disabled":""}>Later ›</button>
+      </div>
+      <details class="grp" data-group="income" ${sgOpen.income?"open":""}>
+        <summary>Income <span class="cnt">${state.income.length}</span></summary>
+        <div class="grpbody">${state.income.map(it=>itemRow(it,mk,"in")).join("")}</div>
+      </details>
+      <details class="grp" data-group="pay" ${sgOpen.pay?"open":""}>
+        <summary>Cards &amp; Loans <span class="cnt">${state.payments.length}</span></summary>
+        <div class="grpbody">${state.payments.map(p=>itemRow(p,mk,"out")).join("")}</div>
+      </details>
+      <div class="btnrow">
+        <button class="btn" id="add-in">Add income</button>
+        <button class="btn" id="add-out">Add card or loan</button>
+      </div>
+      <button class="btn wide" id="copyfwd">Copy this month's amounts to all later months</button>
+    </section>
+
+    <details class="adv" id="adv" ${advOpen?"open":""}>
+      <summary>Advanced Options</summary>
+      <div class="advbody">
+    <section>
+      <h2>Appearance</h2>
+      <p class="sub">Auto follows your phone. Pick Light or Dark to override it.</p>
+      <div class="seg">
+        <button data-theme-set="auto" class="${(state.theme||"auto")==="auto"?"on":""}">Auto</button>
+        <button data-theme-set="light" class="${state.theme==="light"?"on":""}">Light</button>
+        <button data-theme-set="dark" class="${state.theme==="dark"?"on":""}">Dark</button>
+      </div>
+    </section>
+    <section>
+      <h2>Starting Point</h2>
+      <p class="sub">The one balance you enter by hand. Everything after this date comes from your log.</p>
+      ${accts().map(a=>`<div class="field">
+        <label for="ab-${a.id}"><span class="atag ${a.id}">${esc(a.name)}</span> ${esc(a.label)}</label>
+        <input id="ab-${a.id}" type="number" step="0.01" inputmode="decimal" value="${a.opening}" data-acctopen="${a.id}"></div>`).join("")}
+      <div class="field"><label for="a-date">On</label><input id="a-date" type="date" value="${state.anchor.date}"></div>
+      <p class="hint">Changing these rewrites every balance in the app. Use Reconcile on the Today tab for routine corrections instead.</p>
+    </section>
+    <section>
       <h2>Expected Income</h2>
       <p class="sub">Whether the forecast counts each income before it arrives. Set anything unreliable, or that turns up in pieces, to Ignore — it then lifts the balance only once you log it.</p>
       ${state.income.map(it=>`<div class="row">
@@ -1536,25 +1574,6 @@ function viewSetup(){
       </div>`).join("")}
       <p class="hint">Ignored income still appears under Coming Up, tagged so you know it is not in the figures.</p>
     </section>
-
-    <section>
-      <h2>Scheduled Items · ${monthLabel(mk)}</h2>
-      <p class="sub">Tap a name to rename it or change its due day. Amounts are per month — move between months with the arrows below.</p>
-      <div class="btnrow" style="margin:0 0 10px">
-        <button class="btn mini" id="prev2" ${curMonth===0?"disabled":""}>‹ Earlier</button>
-        <button class="btn mini" id="next2" ${curMonth===keys.length-1?"disabled":""}>Later ›</button>
-      </div>
-      <h2 style="margin-top:14px">Income</h2>
-      ${state.income.map(it=>itemRow(it,mk,"in")).join("")}
-      <h2 style="margin-top:18px">Cards &amp; Loans</h2>
-      ${state.payments.map(p=>itemRow(p,mk,"out")).join("")}
-      <div class="btnrow">
-        <button class="btn" id="add-in">Add income</button>
-        <button class="btn" id="add-out">Add card or loan</button>
-      </div>
-      <button class="btn wide" id="copyfwd">Copy this month's amounts to all later months</button>
-    </section>
-
     <section>
       <h2>Data</h2>
       <div class="card ${storeMode==="none"?"alert":""}" id="storestat">
@@ -1577,7 +1596,9 @@ function viewSetup(){
       <p class="hint">Downloads a calendar file with one repeating entry per card and loan, each alerting you the day before. Open it and Apple Calendar will offer to add them.</p>
       <button class="btn wide" id="export">Copy as a table for Excel</button>
       <button class="btn wide danger" id="reset">Start over from the spreadsheet figures</button>
-    </section>`;
+    </section>
+      </div>
+    </details>`;
 }
 
 /** Actually write something and read it back, rather than assuming. */
@@ -1700,6 +1721,10 @@ function wire(){
   const on=(sel,fn)=>document.querySelectorAll(sel).forEach(fn);
 
   on("[data-tab]",b=>b.onclick=()=>{ tab=b.dataset.tab; render(); window.scrollTo(0,0); });
+  document.querySelectorAll("[data-group]").forEach(el=>{
+    el.ontoggle=()=>{ sgOpen[el.dataset.group]=el.open; };
+  });
+  if($("adv")) $("adv").ontoggle=()=>{ advOpen=$("adv").open; };
   on("[data-banktap]",b=>{
     b.onclick=()=>{
       const id=b.dataset.banktap, now=Date.now();
