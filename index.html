@@ -19,6 +19,7 @@
     --bg:#F2F5F4; --surface:#FFFFFF; --ink:#0B1614; --muted:#4A5A55;
     --rule:#B7C5C0; --rule-soft:#DCE5E2; --onink:#FFFFFF;
     --in:#0E5F51; --out:#8C2F3C; --warn:#7A5810; --radius:7px;
+    --eib:#6A35CC; --cbd:#0B6F80;
   }
   /* follow the phone when set to Auto */
   @media (prefers-color-scheme:dark){
@@ -26,6 +27,7 @@
       --bg:#0D1412; --surface:#1A2421; --ink:#F1F6F4; --muted:#9FAFA9;
       --rule:#33433E; --rule-soft:#25322E; --onink:#0D1412;
       --in:#5CCBAB; --out:#FF97A2; --warn:#E0B463;
+      --eib:#B8A0FF; --cbd:#4FD3E8;
     }
   }
   /* explicit choice wins */
@@ -34,6 +36,7 @@
     --bg:#0D1412; --surface:#1A2421; --ink:#F1F6F4; --muted:#9FAFA9;
     --rule:#33433E; --rule-soft:#25322E; --onink:#0D1412;
     --in:#5CCBAB; --out:#FF97A2; --warn:#E0B463;
+    --eib:#B8A0FF; --cbd:#4FD3E8;
   }
   :root[data-theme="light"]{ color-scheme:light; }
   *{box-sizing:border-box}
@@ -78,6 +81,17 @@
   .figure .lbl{font-size:15px;font-weight:500;color:var(--muted);margin-right:10px;letter-spacing:0}
   .figure .cur{font-size:16px;font-weight:500;color:var(--muted);margin-left:6px;letter-spacing:0}
   .neg{color:var(--out)} .pos{color:var(--in)}
+  .banks{display:flex;gap:9px;margin-top:14px}
+  .bank{flex:1;min-width:0;border:1px solid var(--rule);border-left-width:3px;
+        border-radius:var(--radius);background:var(--surface);padding:9px 11px}
+  .bank .bn{display:block;font-size:11.5px;letter-spacing:.04em;font-weight:620}
+  .bank .bv{display:block;font-size:18px;font-weight:600;margin-top:3px;
+            font-variant-numeric:tabular-nums;letter-spacing:-.01em;
+            overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bank.eib{border-left-color:var(--eib)} .bank.eib .bn,.bank.eib .bv{color:var(--eib)}
+  .bank.cbd{border-left-color:var(--cbd)} .bank.cbd .bn,.bank.cbd .bv{color:var(--cbd)}
+  .atag{font-weight:620;font-size:11px;letter-spacing:.03em}
+  .atag.eib{color:var(--eib)} .atag.cbd{color:var(--cbd)}
   .lead{font-size:13.5px;color:var(--muted);margin:8px 0 0}
   .lead strong{color:var(--ink);font-weight:620}
 
@@ -257,6 +271,27 @@
     border:none;border-bottom:2px solid var(--rule);padding:6px 0 10px;background:none;
     font-variant-numeric:tabular-nums;
   }
+  .totrow{display:flex;justify-content:space-between;padding:11px 0 0;margin-top:4px;
+          border-top:1px solid var(--rule);font-size:14px}
+  .totrow .v{font-weight:600}
+  .totrow.out .v{color:var(--out)}
+  .bar{display:block;height:6px;border-radius:3px;background:var(--rule-soft);overflow:hidden;margin-top:10px}
+  .bar span{display:block;height:100%;border-radius:3px}
+  .bar.mini{height:4px;margin-top:5px;max-width:180px}
+  .picker{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+  .picker select{flex:1;min-width:0;padding:8px 9px;border:1px solid var(--rule);
+                 border-radius:var(--radius);background:var(--surface);color:var(--ink);
+                 font-size:14.5px;appearance:none;-webkit-appearance:none;
+                 background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),
+                                  linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+                 background-position:calc(100% - 15px) 55%,calc(100% - 10px) 55%;
+                 background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:28px}
+  .picker input.amt{width:84px}
+  .chip.ac.eib.on{background:var(--eib);border-color:var(--eib);color:var(--onink)}
+  .chip.ac.cbd.on{background:var(--cbd);border-color:var(--cbd);color:var(--onink)}
+  .xfer{margin-top:16px}
+  .xside .xl{font-size:12px;color:var(--muted);display:block}
+  .xarrow{text-align:center;color:var(--muted);font-size:17px;margin:2px 0}
   .chips{display:flex;flex-wrap:wrap;gap:7px;margin:16px 0 4px}
   .chip{padding:7px 12px;border-radius:16px;border:1px solid var(--rule);background:var(--surface);font-size:13px;cursor:pointer}
   .chip.on{background:var(--ink);color:var(--onink);border-color:var(--ink)}
@@ -302,6 +337,8 @@ function defaultState(){
     v:2,
     startMonth:s,
     anchor:{ balance:14288.56, date:"2026-09-05" },
+    accounts:[ {id:"eib",name:"EIB",label:"Emirates Islamic Bank",opening:14288.56},
+               {id:"cbd",name:"CBD",label:"Commercial Bank of Dubai",opening:0} ],
     budgets:{},
     income:[
       {id:"i1",count:true,name:"BOGUS BT Citi ATE (less deem)",day:1,amounts:spread(s,[6200,6200,6200,8000,8000,0,0,0,0,0,0,0])},
@@ -368,6 +405,29 @@ function extendHorizon(){
 }
 
 /* ---------- the engine ---------- */
+/* ---------- accounts ---------- */
+function accts(){ return state.accounts||[]; }
+function acctOf(id){ return accts().find(a=>a.id===id); }
+function acctName(id){ const a=acctOf(id); return a?a.name:"—"; }
+const DEF_ACCT="eib";
+
+/** A transfer moves money between accounts; it never changes the total. */
+function isXfer(t){ return !!(t&&t.xfer); }
+
+function acctBalance(id){
+  const a=acctOf(id); if(!a) return 0;
+  const today=todayISO();
+  return state.tx.reduce((sum,t)=>{
+    if(t.date<state.anchor.date || t.date>today) return sum;
+    if(isXfer(t)){
+      if(t.xfer.from===id) return sum-Math.abs(t.amount);
+      if(t.xfer.to===id)   return sum+Math.abs(t.amount);
+      return sum;
+    }
+    return (t.acct||DEF_ACCT)===id ? sum+t.amount : sum;
+  }, Number(a.opening)||0);
+}
+
 /* ---------- monthly spending budgets ---------- */
 function budgetSum(){
   const b=state.budgets||{};
@@ -377,7 +437,7 @@ function budgetSum(){
 function spentByCat(mk){
   const o={};
   state.tx.forEach(t=>{
-    if(t.amount<0 && !t.link && !t.adj && monthOf(t.date)===mk){
+    if(t.amount<0 && !t.link && !t.adj && !isXfer(t) && monthOf(t.date)===mk){
       const c=t.cat||"Other"; o[c]=(o[c]||0)+Math.abs(t.amount);
     }
   });
@@ -421,6 +481,7 @@ function settled(id,mk){
 /** Some of it has come in, but not all. */
 function partly(id,mk){ return receivedFor(id,mk)>0 && !settled(id,mk); }
 function balanceNow(){
+  if(accts().length) return accts().reduce((s,a)=>s+acctBalance(a.id),0);
   const t=todayISO();
   return state.tx.reduce((s,x)=> (x.date>=state.anchor.date && x.date<=t) ? s+x.amount : s,
                           Number(state.anchor.balance)||0);
@@ -460,7 +521,7 @@ function build(){
       const evs=[];
 
       // anything logged on this day, whether it has happened yet or not
-      (byDate[day]||[]).forEach(t=>evs.push({
+      (byDate[day]||[]).filter(t=>!isXfer(t)).forEach(t=>evs.push({
         cls:"actual "+(t.amount>=0?"in":"out"), day:d,
         name:t.desc || (t.link?linkName(t.link.itemId):"Entry"),
         amount:t.amount, future:day>today, txid:t.id
@@ -943,6 +1004,12 @@ function cfiSpark(M){
 }
 
 function viewCfi(){
+  if(!Array.isArray(state.accounts) || !state.accounts.length){
+    state.accounts=[ {id:"eib",name:"EIB",label:"Emirates Islamic Bank",opening:Number(state.anchor.balance)||0},
+                     {id:"cbd",name:"CBD",label:"Commercial Bank of Dubai",opening:0} ];
+  }
+  state.tx.forEach(t=>{ if(!t.acct && !t.xfer) t.acct=DEF_ACCT; });
+  [...state.income,...state.payments].forEach(it=>{ if(!it.acct) it.acct=DEF_ACCT; });
   cfiInit();
   const all=cfiBuild(), keys=cfiRange();
   if(cfiMonth>=keys.length) cfiMonth=keys.length-1;
@@ -1151,9 +1218,10 @@ function openCfiFlow(){
         const rate=Number(state.cfi.rate)||0;
         aed=Math.round(v*rate*100)/100;
         const cfiItem=state.income.find(x=>/^CFI/i.test(x.name)) || state.income.find(x=>x.id==="i4");
+        const cfiAcct=(state.income.find(x=>/^CFI/i.test(x.name))||{}).acct||DEF_ACCT;
         state.tx.push({ id:"t"+Date.now(), date:fdate, amount:aed,
                         desc:"CFI withdrawal, $"+nf.format(v)+" at "+rate,
-                        cat:null, cfiFlow:fid,
+                        cat:null, cfiFlow:fid, acct:cfiAcct,
                         link: cfiItem?{itemId:cfiItem.id,month:monthOf(fdate)}:null });
       }
       save(); closeSheet(); render();
@@ -1169,7 +1237,7 @@ function openCfiFlow(){
 /* ==========================================================
    RENDER
    ========================================================== */
-let state=null, tab="today", lastTab="today", curMonth=0, cfiMonth=0, cfiSign="profit", months=null;
+let state=null, tab="today", lastTab="today", curMonth=0, cfiMonth=0, cfiSign="profit", months=null, reconAcct=null, confAcct=null;
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
 function applyTheme(){
@@ -1227,6 +1295,9 @@ function viewToday(){
       <h1>Spend Less Nabil !!</h1>
       <div class="when">${dayLabel(t)} · updates as you log</div>
       <div class="figure ${bal<0?"neg":""}"><span class="lbl">Balance</span>${money(bal)}<span class="cur">AED</span></div>
+      <div class="banks">${accts().map(a=>`<div class="bank ${a.id}">
+        <span class="bn">${esc(a.name)}</span>
+        <span class="bv">${money(acctBalance(a.id))}</span></div>`).join("")}</div>
       <p class="lead">${
         o.at
           ? (o.low<0 && o.dip
@@ -1304,14 +1375,15 @@ function viewLog(){
   t.forEach(x=>{ (groups[x.date]=groups[x.date]||[]).push(x); });
   return `<div class="top"><h1>Log</h1><div class="when">${t.length} entr${t.length===1?"y":"ies"} · newest first</div></div>
     ${Object.keys(groups).sort().reverse().map(d=>{
-      const net=groups[d].reduce((s,x)=>s+x.amount,0);
+      const net=groups[d].reduce((s,x)=>s+(isXfer(x)?0:x.amount),0);
       return `<div class="daygroup">
         <div class="dayhead"><span>${dayLabel(d)}${d===todayISO()?" · today":""}</span><span>${signed(net)}</span></div>
         ${groups[d].map(x=>`<div class="row">
-          <span class="name"><span class="n">${esc(x.desc||linkName(x.link&&x.link.itemId))}</span>
-          <span class="d">${x.adj?"correction":(x.link?"planned item":(x.cat||"day-to-day"))}${x.att?" · bill attached":""}</span></span>
+          <span class="name"><span class="n">${isXfer(x)?`${esc(acctName(x.xfer.from))} → ${esc(acctName(x.xfer.to))}`:esc(x.desc||linkName(x.link&&x.link.itemId))}</span>
+          <span class="d">${isXfer(x)?"transfer between accounts"
+            :`<span class="atag ${x.acct||"eib"}">${esc(acctName(x.acct||"eib"))}</span> · ${x.adj?"correction":(x.link?"planned item":(x.cat||"day-to-day"))}`}${x.att?" · bill attached":""}</span></span>
           ${x.att?`<button class="att" data-att="${x.id}" aria-label="Open attached bill">&#128206;</button>`:""}
-          <span class="v ${x.amount>=0?"in":"out"}">${signed(x.amount)}</span>
+          <span class="v ${isXfer(x)?"":(x.amount>=0?"in":"out")}">${isXfer(x)?money(Math.abs(x.amount)):signed(x.amount)}</span>
           <button class="del" data-deltx="${x.id}" aria-label="Delete entry">×</button>
         </div>`).join("")}
       </div>`;
@@ -1408,7 +1480,9 @@ function viewSetup(){
     <section>
       <h2>Starting Point</h2>
       <p class="sub">The one balance you enter by hand. Everything after this date comes from your log.</p>
-      <div class="field"><label for="a-bal">Balance</label><input id="a-bal" type="number" step="0.01" inputmode="decimal" value="${state.anchor.balance}"></div>
+      ${accts().map(a=>`<div class="field">
+        <label for="ab-${a.id}"><span class="atag ${a.id}">${esc(a.name)}</span> ${esc(a.label)}</label>
+        <input id="ab-${a.id}" type="number" step="0.01" inputmode="decimal" value="${a.opening}" data-acctopen="${a.id}"></div>`).join("")}
       <div class="field"><label for="a-date">On</label><input id="a-date" type="date" value="${state.anchor.date}"></div>
       <p class="hint">Changing these rewrites every balance in the app. Use Reconcile on the Today tab for routine corrections instead.</p>
     </section>
@@ -1526,10 +1600,40 @@ function itemRow(it,mk,kind){
   return `<div class="row">
     <button class="tick ${kind==="out"?"out":""} ${done?"on":""} ${part?"part":""}" data-tick="${it.id}|${mk}|${kind}"
             aria-pressed="${done}" aria-label="Mark ${esc(it.name)} ${kind==="in"?"received":"paid"}">${part?"–":"✓"}</button>
-    <span class="name tap" data-rename="${it.id}|${kind}"><span class="n">${esc(it.name)}</span><span class="d">day ${it.day}${note?" · "+note:""}</span></span>
+    <span class="name tap" data-rename="${it.id}|${kind}"><span class="n">${esc(it.name)}</span><span class="d"><span class="atag ${it.acct||DEF_ACCT}">${esc(acctName(it.acct||DEF_ACCT))}</span> · day ${it.day}${note?" · "+note:""}</span></span>
     <input class="amt" type="number" inputmode="decimal" value="${a||""}" placeholder="0" data-amt="${it.id}|${kind}">
     <button class="del" data-delitem="${it.id}|${kind}">×</button>
   </div>`;
+}
+
+/**
+ * Works out which account can actually cover a payment.
+ * Prefers the one the item is assigned to; falls back to whichever holds
+ * enough; splits across both if neither can manage it alone.
+ * Returns a list of {acct, amount} to post.
+ */
+function routePayment(amt, prefId){
+  const pref=prefId||DEF_ACCT;
+  const list=accts().map(a=>({id:a.id, bal:acctBalance(a.id)}));
+  const p=list.find(a=>a.id===pref) || list[0];
+  if(!p) return [{acct:pref, amount:amt, why:"only"}];
+
+  if(p.bal>=amt) return [{acct:p.id, amount:amt, why:"preferred"}];
+
+  const others=list.filter(a=>a.id!==p.id).sort((a,b)=>b.bal-a.bal);
+  const covers=others.find(a=>a.bal>=amt);
+  if(covers) return [{acct:covers.id, amount:amt, why:"switched", short:p.bal}];
+
+  // nobody can cover it alone — take what the preferred account holds, rest from the next best
+  const fromPref=Math.max(0,Math.min(amt,p.bal));
+  const rest=Math.round((amt-fromPref)*100)/100;
+  const out=[];
+  if(fromPref>0) out.push({acct:p.id, amount:Math.round(fromPref*100)/100, why:"split"});
+  if(rest>0){
+    const next=others[0];
+    out.push({acct: next?next.id:p.id, amount:rest, why: next?"split":"overdrawn"});
+  }
+  return out.length?out:[{acct:p.id, amount:amt, why:"overdrawn"}];
 }
 
 /** One tap: log whatever is still outstanding, or clear the lot. */
@@ -1549,11 +1653,35 @@ function toggleSettle(id,mk,kind){
   const date = dueDate > todayISO() ? todayISO() : dueDate;
   const wasPartial = partly(id,mk);
 
-  state.tx.push({ id:"t"+Date.now(), date, amount: kind==="in"?amt:-amt,
-                  desc: it.name+(wasPartial?" (rest of it)":""), cat:null,
-                  link:{itemId:id,month:mk} });
+  const base=it.name+(wasPartial?" (rest of it)":"");
+  if(kind==="in"){
+    const into=it.acct||DEF_ACCT;
+    state.tx.push({ id:"t"+Date.now(), date, amount:amt, desc:base, cat:null,
+                    acct:into, link:{itemId:id,month:mk} });
+    save(); render();
+    toast("Received "+money(amt)+" into "+acctName(into)+" · "+money(acctBalance(into)));
+    return;
+  }
+
+  const plan=routePayment(amt, it.acct||DEF_ACCT);
+  plan.forEach((leg,i)=>{
+    state.tx.push({ id:"t"+Date.now()+"-"+i, date, amount:-leg.amount,
+                    desc: base+(plan.length>1?" ("+acctName(leg.acct)+" share)":""),
+                    cat:null, acct:leg.acct, link:{itemId:id,month:mk} });
+  });
   save(); render();
-  toast((kind==="in"?"Received ":"Paid ")+money(amt)+" · balance "+money(balanceNow()));
+
+  if(plan.length>1){
+    toast("Paid "+money(amt)+" · "+plan.map(l=>money(l.amount)+" from "+acctName(l.acct)).join(" and "));
+  }else if(plan[0].why==="switched"){
+    toast(acctName(it.acct||DEF_ACCT)+" only had "+money(plan[0].short)
+          +" — paid "+money(amt)+" from "+acctName(plan[0].acct)+" instead");
+  }else if(plan[0].why==="overdrawn"){
+    toast("Paid "+money(amt)+" from "+acctName(plan[0].acct)
+          +" — that takes it to "+money(acctBalance(plan[0].acct)));
+  }else{
+    toast("Paid "+money(amt)+" from "+acctName(plan[0].acct)+" · "+money(acctBalance(plan[0].acct)));
+  }
 }
 
 /* ==========================================================
@@ -1596,7 +1724,7 @@ function wire(){
     const list=kind==="in"?state.income:state.payments;
     const it=list.find(x=>x.id===id);
     if(settled(id,mk)){ toast("Fully logged — tap the tick to clear it"); return; }
-    openConfirm(it,mk,kind);
+    confAcct=null; openConfirm(it,mk,kind);
   });
 
   on("[data-deltx]",b=>b.onclick=()=>{
@@ -1647,7 +1775,12 @@ function wire(){
   if($("cfi-week")) $("cfi-week").onchange=e=>{ cfiInit(); state.cfi.weeklyTarget=Math.max(0,Number(e.target.value)||0); save(); render(); };
   if($("cfi-rate")) $("cfi-rate").onchange=e=>{ cfiInit(); state.cfi.rate=Math.max(0,Number(e.target.value)||0); save(); render(); };
   if($("cfi-target")) $("cfi-target").onchange=e=>{ cfiInit(); state.cfi.target=Math.max(0,Number(e.target.value)||0); save(); render(); };
-  if($("a-bal")) $("a-bal").onchange=e=>{ state.anchor.balance=Number(e.target.value)||0; save(); render(); };
+  on("[data-acctopen]",el=>el.onchange=()=>{
+    const a=acctOf(el.dataset.acctopen); if(!a) return;
+    a.opening=Number(el.value)||0;
+    state.anchor.balance=accts().reduce((s2,x)=>s2+(Number(x.opening)||0),0);
+    save(); render();
+  });
   if($("a-date")) $("a-date").onchange=e=>{ state.anchor.date=e.target.value; save(); render(); };
   if($("fillbudget")) $("fillbudget").onclick=()=>{
     const src=$("fillbudget").dataset.src, o=spentByCat(src);
@@ -1891,22 +2024,33 @@ function wireAddSheet(){
 
 function openConfirm(it,mk,kind){
   const planned=plannedFor(it,mk), got=receivedFor(it.id,mk), left=remainingFor(it,mk);
+  if(!confAcct) confAcct = kind==="in" ? (it.acct||DEF_ACCT)
+                                       : routePayment(left||planned, it.acct||DEF_ACCT)[0].acct;
   const dueDate=iso(mk,clampDay(mk,it.day));
   const defDate=dueDate>todayISO()?todayISO():dueDate;
   openSheet(`
     <h2>${esc(it.name)}</h2>
     <p class="sub">Planned ${signed(kind==="in"?planned:-planned)} on ${dayLabel(dueDate)}.${got>0?` ${money(got)} already in — ${money(left)} outstanding.`:""} Enter what actually ${kind==="in"?"arrived":"went out"}; log the rest later as another entry.</p>
     <input class="bigin" id="c-amt" type="number" step="0.01" inputmode="decimal" value="${left||planned}">
+    <p class="sub" style="margin:14px 0 0">${kind==="in"?"Landing in":"Coming out of"}</p>
+    <div class="chips">${accts().map(a=>`<button class="chip ac ${a.id} ${a.id===confAcct?"on":""}" data-cacct="${a.id}">${esc(a.name)} · ${money(acctBalance(a.id))}</button>`).join("")}</div>
     <div class="field"><label for="c-date">Date</label><input id="c-date" type="date" value="${defDate}"></div>
     <button class="btn solid wide" id="c-save">${kind==="in"?"Mark received":"Mark paid"}</button>
     <button class="btn wide" data-close>Cancel</button>
   `);
   const p=document.getElementById("panel");
+  p.querySelectorAll("[data-cacct]").forEach(b=>b.onclick=()=>{
+    confAcct=b.dataset.cacct;
+    p.querySelectorAll("[data-cacct]").forEach(x=>x.classList.toggle("on",x.dataset.cacct===confAcct));
+  });
   p.querySelector("#c-save").onclick=()=>{
     const v=Math.abs(Number(p.querySelector("#c-amt").value)||0);
     state.tx.push({ id:"t"+Date.now(), date:p.querySelector("#c-date").value,
-                    amount:kind==="in"?v:-v, desc:it.name, cat:null, link:{itemId:it.id,month:mk} });
-    save(); closeSheet(); render(); toast("Logged");
+                    amount:kind==="in"?v:-v, desc:it.name, cat:null,
+                    acct: confAcct||it.acct||DEF_ACCT, link:{itemId:it.id,month:mk} });
+    const used=confAcct||it.acct||DEF_ACCT; confAcct=null;
+    save(); closeSheet(); render();
+    toast("Logged · "+acctName(used)+" now "+money(acctBalance(used)));
   };
   bindClose();
 }
@@ -1920,15 +2064,22 @@ function openRename(id,kind){
     <input class="text" id="e-name" type="text" value="${esc(it.name)}" placeholder="Name">
     <div class="field"><label for="e-day">Due day of month</label>
       <input id="e-day" type="number" min="1" max="31" inputmode="numeric" value="${it.day}"></div>
+    <p class="sub" style="margin:14px 0 0">Which account it ${kind==="in"?"lands in":"leaves from"}</p>
+    <div class="chips">${accts().map(a=>`<button class="chip ac ${a.id} ${(it.acct||DEF_ACCT)===a.id?"on":""}" data-eacct="${a.id}">${esc(a.name)}</button>`).join("")}</div>
     <button class="btn solid wide" id="e-save">Save</button>
     <button class="btn wide" data-close>Cancel</button>
   `);
   const p=document.getElementById("panel");
+  let pickAcct=it.acct||DEF_ACCT;
+  p.querySelectorAll("[data-eacct]").forEach(b=>b.onclick=()=>{
+    pickAcct=b.dataset.eacct;
+    p.querySelectorAll("[data-eacct]").forEach(x=>x.classList.toggle("on",x.dataset.eacct===pickAcct));
+  });
   p.querySelector("#e-save").onclick=()=>{
     const nm=p.querySelector("#e-name").value.trim();
     if(!nm){ toast("Give it a name"); return; }
     const d=Math.min(31,Math.max(1,parseInt(p.querySelector("#e-day").value,10)||it.day));
-    it.name=nm; it.day=d;
+    it.name=nm; it.day=d; it.acct=pickAcct;
     save(); closeSheet(); render(); toast("Updated");
   };
   bindClose();
@@ -1981,16 +2132,19 @@ function downloadFile(name,text,mime){
 }
 
 function openReconcile(){
-  const bal=balanceNow();
+  reconAcct=reconAcct||(accts()[0]||{}).id||DEF_ACCT;
+  const bal=acctBalance(reconAcct);
   openSheet(`
     <h2>Reconcile</h2>
-    <p class="sub">This app says <strong>${money(bal)}</strong>. What does your bank say?</p>
+    <div class="chips">${accts().map(a=>`<button class="chip ac ${a.id} ${a.id===reconAcct?"on":""}" data-racct="${a.id}">${esc(a.name)}</button>`).join("")}</div>
+    <p class="sub">This app says <strong>${money(bal)}</strong> in ${esc(acctName(reconAcct))}. What does the bank say?</p>
     <input class="bigin" id="r-amt" type="number" step="0.01" inputmode="decimal" placeholder="${bal.toFixed(2)}">
     <div id="r-diff" class="hint"></div>
     <button class="btn solid wide" id="r-save">Record the difference</button>
     <button class="btn wide" data-close>Cancel</button>
   `);
   const p=document.getElementById("panel");
+  p.querySelectorAll("[data-racct]").forEach(b=>b.onclick=()=>{ reconAcct=b.dataset.racct; openReconcile(); });
   const inp=p.querySelector("#r-amt"), out=p.querySelector("#r-diff");
   inp.oninput=()=>{
     const v=Number(inp.value);
@@ -2004,7 +2158,8 @@ function openReconcile(){
     const diff=Number(inp.value)-bal;
     if(diff===0){ closeSheet(); toast("Already matching"); return; }
     state.tx.push({ id:"t"+Date.now(), date:todayISO(), amount:diff,
-                    desc:"Balance correction", cat:null, link:null, adj:true });
+                    desc:"Balance correction, "+acctName(reconAcct), cat:null,
+                    acct:reconAcct, link:null, adj:true });
     save(); closeSheet(); render(); toast("Balance corrected");
   };
   bindClose();
