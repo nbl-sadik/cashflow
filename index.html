@@ -1240,6 +1240,9 @@ function openCfiFlow(){
 /* ==========================================================
    RENDER
    ========================================================== */
+const TAB_ICON={today:"◉",log:"≡",months:"▤",cfi:"◫"};
+const TAB_NAME={today:"Today",log:"Log",months:"Months",cfi:"CFI"};
+const BAR_NAME={today:"Today",log:"Log",months:"Months",cfi:"CFI Profit Tracker"};
 let state=null, tab="today", lastTab="today", curMonth=0, cfiMonth=0, cfiSign="profit", months=null, reconAcct=null, confAcct=null, tapAcct=null, tapTime=0;
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
@@ -1256,13 +1259,13 @@ function render(){
   app.innerHTML = tab==="today"?viewToday() : tab==="log"?viewLog() : tab==="months"?viewMonths() : tab==="cfi"?viewCfi() : viewSetup();
   document.getElementById("tabs").innerHTML=["today","log","months","cfi"].map(t=>
     `<button data-tab="${t}" class="${tab===t?"on":""}">
-       <span class="g">${{today:"◉",log:"≡",months:"▤",cfi:"◫"}[t]}</span>
-       ${{today:"Today",log:"Log",months:"Months",cfi:"CFI"}[t]}
+       <span class="g">${TAB_ICON[t]}</span>
+       ${TAB_NAME[t]}
      </button>`).join("");
 
   document.getElementById("appbar").innerHTML = tab==="setup"
     ? `<button class="back" id="ab-back">‹ Back</button><span class="title">Setup</span>`
-    : `<span class="title">${{today:"Today",log:"Log",months:"Months",cfi:"CFI Profit Tracker"}[tab]}</span>
+    : `<span class="title">${BAR_NAME[tab]}</span>
        <button class="icon" id="ab-menu" aria-label="Open setup">⋯</button>`;
   const fabEl=document.getElementById("fab");
   fabEl.style.display = (tab==="today"||tab==="log"||tab==="cfi") ? "block" : "none";
