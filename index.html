@@ -342,7 +342,7 @@
    Balance now = anchor + everything logged since.
    ========================================================== */
 const N_MONTHS = 12;
-const CATS = ["Groceries","Eating out","Fuel","Transport","Bills","Shopping","Cash","Family","Health","Car wash","Laundry","Charity","Play","Other"];
+const CATS = ["Groceries","Eating out","Fuel","Transport","Bills","Shopping","Cash","Family","Health","Car wash","Laundry","Charity","Play","Company CC Pay","NRE Transfer","Fines","Other"];
 
 function spread(start,vals){
   const o={}; for(let i=0;i<N_MONTHS;i++) o[addMonths(start,i)] = vals[i] ?? 0; return o;
@@ -358,7 +358,7 @@ function defaultState(){
                {id:"cbd",name:"CBD",label:"Commercial Bank of Dubai",opening:0} ],
     budgets:{},
     income:[
-      {id:"i1",count:true,name:"BOGUS BT Citi ATE (less deem)",day:1,amounts:spread(s,[6200,6200,6200,8000,8000,0,0,0,0,0,0,0])},
+      {id:"i1",count:true,name:"BOGUS BT Citi ATE (less deem)",day:1,amounts:spread(s,[6200,0,0,0,0,0,0,0,0,0,0,0])},
       {id:"i2",count:false,name:"Prasanth & Shiju Repay",day:3,amounts:spread(s,[1060,2500,2500,2500,2500,2500,0,0,0,0,0,0])},
       {id:"i3",count:false,name:"Salary",day:15,amounts:spread(s,[15000,15000,15000,15000,15000,15000,15000,15000,15000,15000,15000,15000])},
       {id:"i4",count:true,name:"CFI Income",day:25,amounts:spread(s,[0,0,0,0,0,0,0,0,0,0,0,0])},
@@ -1473,21 +1473,26 @@ function viewSetup(){
   return `
     <div class="top" style="padding-bottom:0"><div class="when">Self-hosted build \u00b7 v3</div></div>
 
-    <section class="sec-cfi">
-      <h2>CFI Account</h2>
-      <p class="sub">The broker balance when you started tracking, and the return you're aiming for each month.</p>
-      <div class="field"><label for="cfi-open">Starting Balance ($)</label>
-        <input id="cfi-open" type="number" step="0.01" inputmode="decimal" value="${(state.cfi&&state.cfi.opening)||0}"></div>
-      <div class="field"><label for="cfi-date">Tracking From</label>
-        <input id="cfi-date" type="date" value="${(state.cfi&&state.cfi.openingDate)||todayISO()}"></div>
-      <div class="field"><label for="cfi-target">Monthly Target %</label>
-        <input id="cfi-target" type="number" step="0.1" inputmode="decimal" value="${(state.cfi&&state.cfi.target)||0}"></div>
-      <div class="field"><label for="cfi-week">Weekly Target %</label>
-        <input id="cfi-week" type="number" step="0.1" inputmode="decimal" value="${(state.cfi&&state.cfi.weeklyTarget)||0}"></div>
-      <div class="field"><label for="cfi-rate">USD To AED Rate</label>
-        <input id="cfi-rate" type="number" step="0.0001" inputmode="decimal" value="${(state.cfi&&state.cfi.rate)||0}"></div>
-      <p class="hint">Withdrawals are logged in dollars here and added to your cash flow in dirhams at this rate, against your CFI Income line.</p>
-      <p class="hint">The percentage is measured against your average capital for the month, so deposits and withdrawals part-way through are weighted by the days they were actually in the account.</p>
+    <section>
+      <h2>Scheduled Items · ${monthLabel(mk)}</h2>
+      <p class="sub">Tap a name to rename it or change its due day. Amounts are per month — move between months with the arrows below.</p>
+      <div class="btnrow" style="margin:0 0 10px">
+        <button class="btn mini" id="prev2" ${curMonth===0?"disabled":""}>‹ Earlier</button>
+        <button class="btn mini" id="next2" ${curMonth===keys.length-1?"disabled":""}>Later ›</button>
+      </div>
+      <details class="grp" data-group="income" ${sgOpen.income?"open":""}>
+        <summary>Income <span class="cnt">${state.income.length}</span></summary>
+        <div class="grpbody">${state.income.map(it=>itemRow(it,mk,"in")).join("")}</div>
+      </details>
+      <details class="grp" data-group="pay" ${sgOpen.pay?"open":""}>
+        <summary>Cards &amp; Loans <span class="cnt">${state.payments.length}</span></summary>
+        <div class="grpbody">${state.payments.map(p=>itemRow(p,mk,"out")).join("")}</div>
+      </details>
+      <div class="btnrow">
+        <button class="btn" id="add-in">Add income</button>
+        <button class="btn" id="add-out">Add card or loan</button>
+      </div>
+      <button class="btn wide" id="copyfwd">Copy this month's amounts to all later months</button>
     </section>
 
     <section>
@@ -1518,26 +1523,21 @@ function viewSetup(){
       <p class="hint">Anything you log against a category counts toward its budget. What's left is spread over the days remaining, so the forecast tightens as you spend and eases if you don't.</p>
     </section>
 
-    <section>
-      <h2>Scheduled Items · ${monthLabel(mk)}</h2>
-      <p class="sub">Tap a name to rename it or change its due day. Amounts are per month — move between months with the arrows below.</p>
-      <div class="btnrow" style="margin:0 0 10px">
-        <button class="btn mini" id="prev2" ${curMonth===0?"disabled":""}>‹ Earlier</button>
-        <button class="btn mini" id="next2" ${curMonth===keys.length-1?"disabled":""}>Later ›</button>
-      </div>
-      <details class="grp" data-group="income" ${sgOpen.income?"open":""}>
-        <summary>Income <span class="cnt">${state.income.length}</span></summary>
-        <div class="grpbody">${state.income.map(it=>itemRow(it,mk,"in")).join("")}</div>
-      </details>
-      <details class="grp" data-group="pay" ${sgOpen.pay?"open":""}>
-        <summary>Cards &amp; Loans <span class="cnt">${state.payments.length}</span></summary>
-        <div class="grpbody">${state.payments.map(p=>itemRow(p,mk,"out")).join("")}</div>
-      </details>
-      <div class="btnrow">
-        <button class="btn" id="add-in">Add income</button>
-        <button class="btn" id="add-out">Add card or loan</button>
-      </div>
-      <button class="btn wide" id="copyfwd">Copy this month's amounts to all later months</button>
+    <section class="sec-cfi">
+      <h2>CFI Account</h2>
+      <p class="sub">The broker balance when you started tracking, and the return you're aiming for each month.</p>
+      <div class="field"><label for="cfi-open">Starting Balance ($)</label>
+        <input id="cfi-open" type="number" step="0.01" inputmode="decimal" value="${(state.cfi&&state.cfi.opening)||0}"></div>
+      <div class="field"><label for="cfi-date">Tracking From</label>
+        <input id="cfi-date" type="date" value="${(state.cfi&&state.cfi.openingDate)||todayISO()}"></div>
+      <div class="field"><label for="cfi-target">Monthly Target %</label>
+        <input id="cfi-target" type="number" step="0.1" inputmode="decimal" value="${(state.cfi&&state.cfi.target)||0}"></div>
+      <div class="field"><label for="cfi-week">Weekly Target %</label>
+        <input id="cfi-week" type="number" step="0.1" inputmode="decimal" value="${(state.cfi&&state.cfi.weeklyTarget)||0}"></div>
+      <div class="field"><label for="cfi-rate">USD To AED Rate</label>
+        <input id="cfi-rate" type="number" step="0.0001" inputmode="decimal" value="${(state.cfi&&state.cfi.rate)||0}"></div>
+      <p class="hint">Withdrawals are logged in dollars here and added to your cash flow in dirhams at this rate, against your CFI Income line.</p>
+      <p class="hint">The percentage is measured against your average capital for the month, so deposits and withdrawals part-way through are weighted by the days they were actually in the account.</p>
     </section>
 
     <details class="adv" id="adv" ${advOpen?"open":""}>
@@ -1629,7 +1629,7 @@ function itemRow(it,mk,kind){
   return `<div class="row">
     <button class="tick ${kind==="out"?"out":""} ${done?"on":""} ${part?"part":""}" data-tick="${it.id}|${mk}|${kind}"
             aria-pressed="${done}" aria-label="Mark ${esc(it.name)} ${kind==="in"?"received":"paid"}">${part?"–":"✓"}</button>
-    <span class="name tap" data-rename="${it.id}|${kind}"><span class="n">${esc(it.name)}</span><span class="d"><span class="atag ${it.acct||DEF_ACCT}">${esc(acctName(it.acct||DEF_ACCT))}</span> · day ${it.day}${note?" · "+note:""}</span></span>
+    <span class="name tap" data-rename="${it.id}|${kind}|${mk}"><span class="n">${esc(it.name)}</span><span class="d"><span class="atag ${it.acct||DEF_ACCT}">${esc(acctName(it.acct||DEF_ACCT))}</span> · day ${it.day}${note?" · "+note:""}</span></span>
     <input class="amt" type="number" inputmode="decimal" value="${a||""}" placeholder="0" data-amt="${it.id}|${kind}">
     <button class="del" data-delitem="${it.id}|${kind}">×</button>
   </div>`;
@@ -1800,8 +1800,8 @@ function wire(){
   });
 
   on("[data-rename]",el=>el.onclick=()=>{
-    const [id,kind]=el.dataset.rename.split("|");
-    openRename(id,kind);
+    const [id,kind,fromMk]=el.dataset.rename.split("|");
+    openRename(id,kind,fromMk);
   });
 
   on("[data-cnt]",b=>b.onclick=()=>{
@@ -2111,7 +2111,7 @@ function openConfirm(it,mk,kind){
   bindClose();
 }
 
-function openRename(id,kind){
+function openRename(id,kind,fromMk){
   const list = kind==="in" ? state.income : state.payments;
   const it = list.find(x=>x.id===id); if(!it) return;
   openSheet(`
@@ -2123,6 +2123,8 @@ function openRename(id,kind){
     <p class="sub" style="margin:14px 0 0">Which account it ${kind==="in"?"lands in":"leaves from"}</p>
     <div class="chips">${accts().map(a=>`<button class="chip ac ${a.id} ${(it.acct||DEF_ACCT)===a.id?"on":""}" data-eacct="${a.id}">${esc(a.name)}</button>`).join("")}</div>
     <button class="btn solid wide" id="e-save">Save</button>
+    ${fromMk?`<button class="btn wide danger" id="e-zero">Stop This From ${monthLabel(fromMk)} Onward</button>
+      <p class="hint">Sets the amount to zero for ${monthLabel(fromMk)} and every month after it. Earlier months and anything already logged are untouched.</p>`:""}
     <button class="btn wide" data-close>Cancel</button>
   `);
   const p=document.getElementById("panel");
@@ -2131,6 +2133,14 @@ function openRename(id,kind){
     pickAcct=b.dataset.eacct;
     p.querySelectorAll("[data-eacct]").forEach(x=>x.classList.toggle("on",x.dataset.eacct===pickAcct));
   });
+  if(p.querySelector("#e-zero")) p.querySelector("#e-zero").onclick=()=>{
+    const keys=monthKeys(), from=keys.indexOf(fromMk);
+    if(from<0) return;
+    if(!confirm("Set "+it.name+" to zero from "+monthLabel(fromMk)+" onward?")) return;
+    keys.slice(from).forEach(k=>{ it.amounts[k]=0; });
+    save(); closeSheet(); render();
+    toast(it.name+" cleared from "+monthLabel(fromMk));
+  };
   p.querySelector("#e-save").onclick=()=>{
     const nm=p.querySelector("#e-name").value.trim();
     if(!nm){ toast("Give it a name"); return; }
